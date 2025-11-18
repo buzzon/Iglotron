@@ -1,4 +1,4 @@
-QT += core gui widgets multimedia multimediawidgets
+QT += core gui widgets multimedia multimediawidgets opengl openglwidgets
 
 CONFIG += c++17
 
@@ -7,10 +7,12 @@ TEMPLATE = app
 
 SOURCES += \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    frangiglwidget.cpp
 
 HEADERS += \
-    mainwindow.h
+    mainwindow.h \
+    frangiglwidget.h
 
 # Правила по умолчанию для развертывания
 qnx: target.path = /tmp/$${TARGET}/bin

@@ -3,13 +3,17 @@
 
 #include <QMainWindow>
 #include <QCamera>
-#include <QVideoWidget>
 #include <QPushButton>
+#include <QSlider>
+#include <QLabel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QMediaCaptureSession>
 #include <QCameraFormat>
 #include <QMediaDevices>
+#include <QVideoSink>
+#include <QVideoFrame>
+#include "frangiglwidget.h"
 
 class MainWindow : public QMainWindow
 {
@@ -22,13 +26,27 @@ public:
 private slots:
     void onButton1Clicked();
     void onButton2Clicked();
+    void onVideoFrameChanged(const QVideoFrame &frame);
+    void onSigmaChanged(int value);
+    void onBetaChanged(int value);
+    void onCChanged(int value);
 
 private:
     QCamera *camera;
-    QVideoWidget *videoWidget;
+    FrangiGLWidget *frangiWidget;
+    QLabel *rawVideoLabel;  // Для отображения исходного видео
     QMediaCaptureSession *captureSession;
+    QVideoSink *videoSink;
     QPushButton *button1;
     QPushButton *button2;
+    
+    // Элементы управления параметрами
+    QSlider *sigmaSlider;
+    QSlider *betaSlider;
+    QSlider *cSlider;
+    QLabel *sigmaLabel;
+    QLabel *betaLabel;
+    QLabel *cLabel;
 };
 
 #endif // MAINWINDOW_H

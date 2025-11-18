@@ -4,6 +4,8 @@ file(REMOVE_RECURSE
   "camera_app_autogen"
   "CMakeFiles/camera_app.dir/camera_app_autogen/mocs_compilation.cpp.o"
   "CMakeFiles/camera_app.dir/camera_app_autogen/mocs_compilation.cpp.o.d"
+  "CMakeFiles/camera_app.dir/frangiglwidget.cpp.o"
+  "CMakeFiles/camera_app.dir/frangiglwidget.cpp.o.d"
   "CMakeFiles/camera_app.dir/main.cpp.o"
   "CMakeFiles/camera_app.dir/main.cpp.o.d"
   "CMakeFiles/camera_app.dir/mainwindow.cpp.o"

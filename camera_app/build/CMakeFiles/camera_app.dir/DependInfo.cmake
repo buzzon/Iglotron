@@ -10,6 +10,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "" "camera_app_autogen/timestamp" "custom" "camera_app_autogen/deps"
   "/home/buzzon/Desktop/Iglotron/camera_app/build/camera_app_autogen/mocs_compilation.cpp" "CMakeFiles/camera_app.dir/camera_app_autogen/mocs_compilation.cpp.o" "gcc" "CMakeFiles/camera_app.dir/camera_app_autogen/mocs_compilation.cpp.o.d"
+  "/home/buzzon/Desktop/Iglotron/camera_app/frangiglwidget.cpp" "CMakeFiles/camera_app.dir/frangiglwidget.cpp.o" "gcc" "CMakeFiles/camera_app.dir/frangiglwidget.cpp.o.d"
   "/home/buzzon/Desktop/Iglotron/camera_app/main.cpp" "CMakeFiles/camera_app.dir/main.cpp.o" "gcc" "CMakeFiles/camera_app.dir/main.cpp.o.d"
   "/home/buzzon/Desktop/Iglotron/camera_app/mainwindow.cpp" "CMakeFiles/camera_app.dir/mainwindow.cpp.o" "gcc" "CMakeFiles/camera_app.dir/mainwindow.cpp.o.d"
   )

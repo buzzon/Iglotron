@@ -9,12 +9,14 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets OpenGL OpenGLWidgets)
 
 add_executable(camera_app
     main.cpp
     mainwindow.cpp
     mainwindow.h
+    frangiglwidget.cpp
+    frangiglwidget.h
 )
 
 target_link_libraries(camera_app
@@ -23,6 +25,8 @@ target_link_libraries(camera_app
     Qt6::Widgets
     Qt6::Multimedia
     Qt6::MultimediaWidgets
+    Qt6::OpenGL
+    Qt6::OpenGLWidgets
 )
 
 set_target_properties(camera_app PROPERTIES

@@ -179,6 +179,30 @@ camera_app_autogen/mocs_compilation.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/camera_app.dir/build.make CMakeFiles/camera_app.dir/camera_app_autogen/mocs_compilation.cpp.s
 .PHONY : camera_app_autogen/mocs_compilation.cpp.s
 
+frangiglwidget.o: frangiglwidget.cpp.o
+.PHONY : frangiglwidget.o
+
+# target to build an object file
+frangiglwidget.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/camera_app.dir/build.make CMakeFiles/camera_app.dir/frangiglwidget.cpp.o
+.PHONY : frangiglwidget.cpp.o
+
+frangiglwidget.i: frangiglwidget.cpp.i
+.PHONY : frangiglwidget.i
+
+# target to preprocess a source file
+frangiglwidget.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/camera_app.dir/build.make CMakeFiles/camera_app.dir/frangiglwidget.cpp.i
+.PHONY : frangiglwidget.cpp.i
+
+frangiglwidget.s: frangiglwidget.cpp.s
+.PHONY : frangiglwidget.s
+
+# target to generate assembly for a file
+frangiglwidget.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/camera_app.dir/build.make CMakeFiles/camera_app.dir/frangiglwidget.cpp.s
+.PHONY : frangiglwidget.cpp.s
+
 main.o: main.cpp.o
 .PHONY : main.o
 
@@ -241,6 +265,9 @@ help:
 	@echo "... camera_app_autogen/mocs_compilation.o"
 	@echo "... camera_app_autogen/mocs_compilation.i"
 	@echo "... camera_app_autogen/mocs_compilation.s"
+	@echo "... frangiglwidget.o"
+	@echo "... frangiglwidget.i"
+	@echo "... frangiglwidget.s"
 	@echo "... main.o"
 	@echo "... main.i"
 	@echo "... main.s"

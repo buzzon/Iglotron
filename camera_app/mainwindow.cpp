@@ -3,6 +3,7 @@
 #include <QCameraFormat>
 #include <QMediaDevices>
 #include <QSize>
+#include <QVideoFrame>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -11,10 +12,82 @@ MainWindow::MainWindow(QWidget *parent)
     QWidget *centralWidget = new QWidget(this);
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
     
-    // Создаем виджет для отображения видео
-    videoWidget = new QVideoWidget(this);
-    videoWidget->setMinimumSize(640, 480);
-    mainLayout->addWidget(videoWidget);
+    // Создаем горизонтальный layout для двух видео виджетов
+    QHBoxLayout *videoLayout = new QHBoxLayout();
+    
+    // Виджет для исходного видео с камеры
+    QVBoxLayout *rawLayout = new QVBoxLayout();
+    QLabel *rawTitle = new QLabel("Raw Camera Feed", this);
+    rawTitle->setAlignment(Qt::AlignCenter);
+    rawLayout->addWidget(rawTitle);
+    
+    rawVideoLabel = new QLabel(this);
+    rawVideoLabel->setMinimumSize(320, 240);
+    rawVideoLabel->setScaledContents(true);
+    rawVideoLabel->setStyleSheet("border: 2px solid green;");
+    rawLayout->addWidget(rawVideoLabel);
+    videoLayout->addLayout(rawLayout);
+    
+    // Виджет для обработанного видео (Frangi)
+    QVBoxLayout *frangiLayout = new QVBoxLayout();
+    QLabel *frangiTitle = new QLabel("Frangi Filter Output", this);
+    frangiTitle->setAlignment(Qt::AlignCenter);
+    frangiLayout->addWidget(frangiTitle);
+    
+    frangiWidget = new FrangiGLWidget(this);
+    frangiWidget->setMinimumSize(320, 240);
+    frangiWidget->setStyleSheet("border: 2px solid blue;");
+    frangiLayout->addWidget(frangiWidget);
+    videoLayout->addLayout(frangiLayout);
+    
+    mainLayout->addLayout(videoLayout);
+    
+    // Создаем панель управления параметрами
+    QVBoxLayout *controlsLayout = new QVBoxLayout();
+    
+    // Sigma slider (0.5 - 10.0, default 1.5)
+    QHBoxLayout *sigmaLayout = new QHBoxLayout();
+    QLabel *sigmaTitle = new QLabel("Sigma (Scale):", this);
+    sigmaSlider = new QSlider(Qt::Horizontal, this);
+    sigmaSlider->setMinimum(5);  // 0.5 * 10
+    sigmaSlider->setMaximum(100); // 10.0 * 10
+    sigmaSlider->setValue(15);    // 1.5 * 10
+    sigmaLabel = new QLabel("1.5", this);
+    sigmaLabel->setMinimumWidth(50);
+    sigmaLayout->addWidget(sigmaTitle);
+    sigmaLayout->addWidget(sigmaSlider);
+    sigmaLayout->addWidget(sigmaLabel);
+    controlsLayout->addLayout(sigmaLayout);
+    
+    // Beta (Alpha) slider (0.1 - 5.0, default 0.5)
+    QHBoxLayout *betaLayout = new QHBoxLayout();
+    QLabel *betaTitle = new QLabel("Alpha (Plate Sensitivity):", this);
+    betaSlider = new QSlider(Qt::Horizontal, this);
+    betaSlider->setMinimum(1);   // 0.1 * 10
+    betaSlider->setMaximum(50);  // 5.0 * 10
+    betaSlider->setValue(5);     // 0.5 * 10
+    betaLabel = new QLabel("0.5", this);
+    betaLabel->setMinimumWidth(50);
+    betaLayout->addWidget(betaTitle);
+    betaLayout->addWidget(betaSlider);
+    betaLayout->addWidget(betaLabel);
+    controlsLayout->addLayout(betaLayout);
+    
+    // C (Gamma) slider (0.1 - 50.0, default 15.0)
+    QHBoxLayout *cLayout = new QHBoxLayout();
+    QLabel *cTitle = new QLabel("Gamma (Contrast):", this);
+    cSlider = new QSlider(Qt::Horizontal, this);
+    cSlider->setMinimum(1);    // 0.1 * 10
+    cSlider->setMaximum(500);  // 50.0 * 10
+    cSlider->setValue(150);    // 15.0 * 10
+    cLabel = new QLabel("15.0", this);
+    cLabel->setMinimumWidth(50);
+    cLayout->addWidget(cTitle);
+    cLayout->addWidget(cSlider);
+    cLayout->addWidget(cLabel);
+    controlsLayout->addLayout(cLayout);
+    
+    mainLayout->addLayout(controlsLayout);
     
     // Создаем layout для кнопок
     QHBoxLayout *buttonsLayout = new QHBoxLayout();
@@ -32,6 +105,11 @@ MainWindow::MainWindow(QWidget *parent)
     mainLayout->addLayout(buttonsLayout);
     
     setCentralWidget(centralWidget);
+    
+    // Подключаем сигналы ползунков
+    connect(sigmaSlider, &QSlider::valueChanged, this, &MainWindow::onSigmaChanged);
+    connect(betaSlider, &QSlider::valueChanged, this, &MainWindow::onBetaChanged);
+    connect(cSlider, &QSlider::valueChanged, this, &MainWindow::onCChanged);
     
     // Подключаем сигналы кнопок (они ничего не делают, как и требовалось)
     connect(button1, &QPushButton::clicked, this, &MainWindow::onButton1Clicked);
@@ -70,8 +148,13 @@ MainWindow::MainWindow(QWidget *parent)
         camera->setCameraFormat(bestFormat);
     }
     
+    // Создаем video sink для получения кадров
+    videoSink = new QVideoSink(this);
+    connect(videoSink, &QVideoSink::videoFrameChanged,
+            this, &MainWindow::onVideoFrameChanged);
+    
     captureSession->setCamera(camera);
-    captureSession->setVideoOutput(videoWidget);
+    captureSession->setVideoOutput(videoSink);
     
     // Запускаем камеру
     camera->start();
@@ -92,4 +175,49 @@ void MainWindow::onButton1Clicked()
 void MainWindow::onButton2Clicked()
 {
     // Кнопка 2 ничего не делает, как и требовалось
+}
+
+void MainWindow::onVideoFrameChanged(const QVideoFrame &frame)
+{
+    if (frame.isValid()) {
+        QVideoFrame clonedFrame(frame);
+        if (clonedFrame.map(QVideoFrame::ReadOnly)) {
+            QImage image = clonedFrame.toImage();
+            clonedFrame.unmap();
+            
+            if (!image.isNull()) {
+                // Показываем исходное изображение
+                QPixmap pixmap = QPixmap::fromImage(image.scaled(
+                    rawVideoLabel->size(),
+                    Qt::KeepAspectRatio,
+                    Qt::SmoothTransformation
+                ));
+                rawVideoLabel->setPixmap(pixmap);
+                
+                // Отправляем на обработку через Frangi
+                frangiWidget->setFrame(image);
+            }
+        }
+    }
+}
+
+void MainWindow::onSigmaChanged(int value)
+{
+    float sigma = value / 10.0f;
+    sigmaLabel->setText(QString::number(sigma, 'f', 1));
+    frangiWidget->setSigma(sigma);
+}
+
+void MainWindow::onBetaChanged(int value)
+{
+    float beta = value / 10.0f;
+    betaLabel->setText(QString::number(beta, 'f', 1));
+    frangiWidget->setBeta(beta);
+}
+
+void MainWindow::onCChanged(int value)
+{
+    float c = value / 10.0f;
+    cLabel->setText(QString::number(c, 'f', 1));
+    frangiWidget->setC(c);
 }

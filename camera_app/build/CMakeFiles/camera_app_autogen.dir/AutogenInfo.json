@@ -256,13 +256,38 @@
 		"/usr/lib/x86_64-linux-gnu/cmake/Qt6MultimediaWidgets/Qt6MultimediaWidgetsTargets.cmake",
 		"/usr/lib/x86_64-linux-gnu/cmake/Qt6MultimediaWidgets/Qt6MultimediaWidgetsTargets-none.cmake",
 		"/usr/lib/x86_64-linux-gnu/cmake/Qt6MultimediaWidgets/Qt6MultimediaWidgetsAdditionalTargetInfo.cmake",
-		"/usr/lib/x86_64-linux-gnu/cmake/Qt6MultimediaWidgets/Qt6MultimediaWidgetsVersionlessTargets.cmake"
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6MultimediaWidgets/Qt6MultimediaWidgetsVersionlessTargets.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLConfigVersion.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLConfigVersionImpl.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLConfig.cmake",
+		"/usr/share/cmake-3.28/Modules/CMakeFindDependencyMacro.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLDependencies.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6/FindWrapVulkanHeaders.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLTargets.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLTargets-none.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLAdditionalTargetInfo.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGL/Qt6OpenGLVersionlessTargets.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsConfigVersion.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsConfigVersionImpl.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsConfig.cmake",
+		"/usr/share/cmake-3.28/Modules/CMakeFindDependencyMacro.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsDependencies.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsTargets.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsTargets-none.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsAdditionalTargetInfo.cmake",
+		"/usr/lib/x86_64-linux-gnu/cmake/Qt6OpenGLWidgets/Qt6OpenGLWidgetsVersionlessTargets.cmake"
 	],
 	"CMAKE_SOURCE_DIR" : "/home/buzzon/Desktop/Iglotron/camera_app",
 	"DEP_FILE" : "/home/buzzon/Desktop/Iglotron/camera_app/build/camera_app_autogen/deps",
 	"DEP_FILE_RULE_NAME" : "camera_app_autogen/timestamp",
 	"HEADERS" : 
 	[
+		[
+			"/home/buzzon/Desktop/Iglotron/camera_app/frangiglwidget.h",
+			"MU",
+			"EWIEGA46WW/moc_frangiglwidget.cpp",
+			null
+		],
 		[
 			"/home/buzzon/Desktop/Iglotron/camera_app/mainwindow.h",
 			"MU",
@@ -281,6 +306,8 @@
 		"QT_MULTIMEDIA_LIB",
 		"QT_NETWORK_LIB",
 		"QT_NO_DEBUG",
+		"QT_OPENGLWIDGETS_LIB",
+		"QT_OPENGL_LIB",
 		"QT_WIDGETS_LIB"
 	],
 	"MOC_DEPEND_FILTERS" : 
@@ -300,6 +327,8 @@
 		"/usr/include/x86_64-linux-gnu/qt6/QtMultimedia",
 		"/usr/include/x86_64-linux-gnu/qt6/QtNetwork",
 		"/usr/include/x86_64-linux-gnu/qt6/QtMultimediaWidgets",
+		"/usr/include/x86_64-linux-gnu/qt6/QtOpenGL",
+		"/usr/include/x86_64-linux-gnu/qt6/QtOpenGLWidgets",
 		"/usr/include",
 		"/usr/include/c++/13",
 		"/usr/include/x86_64-linux-gnu/c++/13",
@@ -340,6 +369,11 @@
 	"SETTINGS_FILE" : "/home/buzzon/Desktop/Iglotron/camera_app/build/CMakeFiles/camera_app_autogen.dir/AutogenUsed.txt",
 	"SOURCES" : 
 	[
+		[
+			"/home/buzzon/Desktop/Iglotron/camera_app/frangiglwidget.cpp",
+			"MU",
+			null
+		],
 		[ "/home/buzzon/Desktop/Iglotron/camera_app/main.cpp", "MU", null ],
 		[ "/home/buzzon/Desktop/Iglotron/camera_app/mainwindow.cpp", "MU", null ]
 	],
