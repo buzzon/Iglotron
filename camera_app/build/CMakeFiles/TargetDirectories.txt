@@ -1,0 +1,5 @@
+/home/buzzon/Desktop/Iglotron/camera_app/build/CMakeFiles/camera_app.dir
+/home/buzzon/Desktop/Iglotron/camera_app/build/CMakeFiles/edit_cache.dir
+/home/buzzon/Desktop/Iglotron/camera_app/build/CMakeFiles/rebuild_cache.dir
+/home/buzzon/Desktop/Iglotron/camera_app/build/CMakeFiles/camera_app_autogen_timestamp_deps.dir
+/home/buzzon/Desktop/Iglotron/camera_app/build/CMakeFiles/camera_app_autogen.dir
