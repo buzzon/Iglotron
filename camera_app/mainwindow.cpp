@@ -87,6 +87,22 @@ MainWindow::MainWindow(QWidget *parent)
     cLayout->addWidget(cLabel);
     controlsLayout->addLayout(cLayout);
     
+    // Display Stage selector
+    QHBoxLayout *stageLayout = new QHBoxLayout();
+    QLabel *stageTitle = new QLabel("Display Stage:", this);
+    stageComboBox = new QComboBox(this);
+    stageComboBox->addItem("0: Grayscale");
+    stageComboBox->addItem("1: Invert");
+    stageComboBox->addItem("2: Blur");
+    stageComboBox->addItem("3: Gradients");
+    stageComboBox->addItem("4: Hessian");
+    stageComboBox->addItem("5: Eigenvalues");
+    stageComboBox->addItem("6: Vesselness");
+    stageComboBox->setCurrentIndex(6);  // По умолчанию Vesselness
+    stageLayout->addWidget(stageTitle);
+    stageLayout->addWidget(stageComboBox);
+    controlsLayout->addLayout(stageLayout);
+    
     mainLayout->addLayout(controlsLayout);
     
     // Создаем layout для кнопок
@@ -106,10 +122,12 @@ MainWindow::MainWindow(QWidget *parent)
     
     setCentralWidget(centralWidget);
     
-    // Подключаем сигналы ползунков
+    // Подключаем сигналы ползунков и комбобокса
     connect(sigmaSlider, &QSlider::valueChanged, this, &MainWindow::onSigmaChanged);
     connect(betaSlider, &QSlider::valueChanged, this, &MainWindow::onBetaChanged);
     connect(cSlider, &QSlider::valueChanged, this, &MainWindow::onCChanged);
+    connect(stageComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onStageChanged);
     
     // Подключаем сигналы кнопок (они ничего не делают, как и требовалось)
     connect(button1, &QPushButton::clicked, this, &MainWindow::onButton1Clicked);
@@ -220,4 +238,9 @@ void MainWindow::onCChanged(int value)
     float c = value / 10.0f;
     cLabel->setText(QString::number(c, 'f', 1));
     frangiWidget->setC(c);
+}
+
+void MainWindow::onStageChanged(int index)
+{
+    frangiWidget->setDisplayStage(index);
 }

@@ -23,6 +23,13 @@ public:
     void setSigma(float sigma) { m_sigma = sigma; update(); }
     void setBeta(float beta) { m_beta = beta; update(); }
     void setC(float c) { m_c = c; update(); }
+    
+    // Выбор отображаемого stage
+    void setDisplayStage(int stage) { m_displayStage = stage; update(); }
+    
+    // Размер изображения для шейдеров
+    int getImageWidth() const { return m_fboGray ? m_fboGray->width() : 512; }
+    int getImageHeight() const { return m_fboGray ? m_fboGray->height() : 512; }
 
 protected:
     void initializeGL() override;
@@ -39,6 +46,7 @@ private:
 
     // Шейдерные программы
     QOpenGLShaderProgram *m_grayscaleShader;
+    QOpenGLShaderProgram *m_invertShader;
     QOpenGLShaderProgram *m_blurXShader;
     QOpenGLShaderProgram *m_blurYShader;
     QOpenGLShaderProgram *m_gradientsShader;
@@ -49,6 +57,7 @@ private:
 
     // Framebuffers для промежуточных результатов
     QOpenGLFramebufferObject *m_fboGray;
+    QOpenGLFramebufferObject *m_fboInvert;
     QOpenGLFramebufferObject *m_fboBlurX;
     QOpenGLFramebufferObject *m_fboBlurY;
     QOpenGLFramebufferObject *m_fboGradients;
@@ -64,6 +73,9 @@ private:
     float m_sigma;
     float m_beta;
     float m_c;
+    
+    // Какой stage показывать (0=grayscale, 1=invert, 2=blur, 3=gradients, 4=hessian, 5=eigenvalues, 6=vesselness)
+    int m_displayStage;
 
     // Quad для рендеринга
     QOpenGLVertexArrayObject *m_vao;

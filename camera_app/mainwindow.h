@@ -6,6 +6,7 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QLabel>
+#include <QComboBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QMediaCaptureSession>
@@ -30,6 +31,7 @@ private slots:
     void onSigmaChanged(int value);
     void onBetaChanged(int value);
     void onCChanged(int value);
+    void onStageChanged(int index);
 
 private:
     QCamera *camera;
@@ -47,6 +49,7 @@ private:
     QLabel *sigmaLabel;
     QLabel *betaLabel;
     QLabel *cLabel;
+    QComboBox *stageComboBox;
 };
 
 #endif // MAINWINDOW_H

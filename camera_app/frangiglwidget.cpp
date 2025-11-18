@@ -5,6 +5,7 @@
 FrangiGLWidget::FrangiGLWidget(QWidget *parent)
     : QOpenGLWidget(parent)
     , m_grayscaleShader(nullptr)
+    , m_invertShader(nullptr)
     , m_blurXShader(nullptr)
     , m_blurYShader(nullptr)
     , m_gradientsShader(nullptr)
@@ -13,6 +14,7 @@ FrangiGLWidget::FrangiGLWidget(QWidget *parent)
     , m_vesselnessShader(nullptr)
     , m_visualizeShader(nullptr)
     , m_fboGray(nullptr)
+    , m_fboInvert(nullptr)
     , m_fboBlurX(nullptr)
     , m_fboBlurY(nullptr)
     , m_fboGradients(nullptr)
@@ -23,6 +25,7 @@ FrangiGLWidget::FrangiGLWidget(QWidget *parent)
     , m_sigma(1.5f)
     , m_beta(0.5f)
     , m_c(15.0f)
+    , m_displayStage(6)  // По умолчанию показываем vesselness (теперь stage 6)
     , m_vao(nullptr)
     , m_vbo(0)
 {
@@ -33,6 +36,7 @@ FrangiGLWidget::~FrangiGLWidget()
     makeCurrent();
     
     delete m_grayscaleShader;
+    delete m_invertShader;
     delete m_blurXShader;
     delete m_blurYShader;
     delete m_gradientsShader;
@@ -42,6 +46,7 @@ FrangiGLWidget::~FrangiGLWidget()
     delete m_visualizeShader;
     
     delete m_fboGray;
+    delete m_fboInvert;
     delete m_fboBlurX;
     delete m_fboBlurY;
     delete m_fboGradients;
@@ -179,6 +184,23 @@ void FrangiGLWidget::createShaders()
         qDebug() << "Grayscale shader linked successfully";
     }
     
+    // Invert shader
+    m_invertShader = new QOpenGLShaderProgram(this);
+    m_invertShader->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader);
+    m_invertShader->addShaderFromSourceCode(QOpenGLShader::Fragment, R"(
+        #version 330 core
+        in vec2 vUv;
+        out vec4 FragColor;
+        uniform sampler2D uTexture;
+        
+        void main() {
+            vec4 color = texture(uTexture, vUv);
+            float inverted = 1.0 - color.x;
+            FragColor = vec4(inverted, inverted, inverted, 1.0);
+        }
+    )");
+    m_invertShader->link();
+    
     // Blur X shader
     m_blurXShader = new QOpenGLShaderProgram(this);
     m_blurXShader->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader);
@@ -190,7 +212,8 @@ void FrangiGLWidget::createShaders()
         uniform float uSigma;
         
         void main() {
-            float h = 1.0 / 512.0;
+            vec2 texSize = vec2(textureSize(uTexture, 0));
+            float h = 1.0 / texSize.x;
             vec4 sum = vec4(0.0);
             float totalWeight = 0.0;
             
@@ -217,7 +240,8 @@ void FrangiGLWidget::createShaders()
         uniform float uSigma;
         
         void main() {
-            float h = 1.0 / 512.0;
+            vec2 texSize = vec2(textureSize(uTexture, 0));
+            float h = 1.0 / texSize.y;
             vec4 sum = vec4(0.0);
             float totalWeight = 0.0;
             
@@ -243,7 +267,8 @@ void FrangiGLWidget::createShaders()
         uniform sampler2D uTexture;
         
         void main() {
-            float h = 1.0 / 512.0;
+            vec2 texSize = vec2(textureSize(uTexture, 0));
+            float h = 1.0 / texSize.x;
             
             // Sobel X
             float gx = texture(uTexture, vUv + vec2(-h, -h)).x * -1.0;
@@ -278,7 +303,8 @@ void FrangiGLWidget::createShaders()
         uniform sampler2D uTexture;
         
         void main() {
-            float h = 2.0 / 512.0;
+            vec2 texSize = vec2(textureSize(uTexture, 0));
+            float h = 2.0 / texSize.x;
             
             vec4 c = texture(uTexture, vUv);
             vec4 px = texture(uTexture, vUv + vec2(h, 0.0));
@@ -377,13 +403,42 @@ void FrangiGLWidget::createShaders()
         in vec2 vUv;
         out vec4 FragColor;
         uniform sampler2D uTexture;
+        uniform int uStage;
         
         void main() {
-            float v = texture(uTexture, vUv).x;
-            v = clamp(v, 0.0, 1.0);
-            v = v * v;
+            vec4 texel = texture(uTexture, vUv);
+            vec3 color;
             
-            vec3 color = vec3(v);
+            if(uStage == 3) {
+                // Gradients: показываем magnitude градиентов с ОЧЕНЬ сильным усилением
+                float gx = texel.x;
+                float gy = texel.y;
+                float magnitude = sqrt(gx*gx + gy*gy);
+                magnitude = magnitude * 50.0; // Усиление x50!
+                magnitude = clamp(magnitude, 0.0, 1.0);
+                // Визуализируем gx как красный, gy как зеленый для отладки
+                color = vec3(abs(gx)*50.0, abs(gy)*50.0, magnitude);
+                color = clamp(color, 0.0, 1.0);
+            } else if(uStage == 4 || uStage == 5) {
+                // Hessian/Eigenvalues: могут быть отрицательными, показываем abs
+                float v = abs(texel.x);
+                v = v * 10.0; // Усиление
+                v = clamp(v, 0.0, 1.0);
+                color = vec3(v);
+            } else if(uStage == 6) {
+                // Vesselness: нужно сильное усиление т.к. значения очень маленькие
+                float v = texel.x;
+                v = v * 100.0; // Усиление x100!
+                v = clamp(v, 0.0, 1.0);
+                v = v * v; // Мягкий контраст для лучшей видимости
+                color = vec3(v);
+            } else {
+                // Grayscale, Invert, Blur: обычная визуализация
+                float v = texel.x;
+                v = clamp(v, 0.0, 1.0);
+                color = vec3(v);
+            }
+            
             FragColor = vec4(color, 1.0);
         }
     )");
@@ -399,6 +454,7 @@ void FrangiGLWidget::recreateFramebuffers(int width, int height)
 {
     // Удаляем старые framebuffer'ы
     delete m_fboGray;
+    delete m_fboInvert;
     delete m_fboBlurX;
     delete m_fboBlurY;
     delete m_fboGradients;
@@ -411,6 +467,7 @@ void FrangiGLWidget::recreateFramebuffers(int width, int height)
     format.setTextureTarget(GL_TEXTURE_2D);
     
     m_fboGray = new QOpenGLFramebufferObject(width, height, format);
+    m_fboInvert = new QOpenGLFramebufferObject(width, height, format);
     m_fboBlurX = new QOpenGLFramebufferObject(width, height, format);
     m_fboBlurY = new QOpenGLFramebufferObject(width, height, format);
     m_fboGradients = new QOpenGLFramebufferObject(width, height, format);
@@ -469,7 +526,21 @@ void FrangiGLWidget::processFrame()
     m_grayscaleShader->release();
     m_fboGray->release();
     
-    // Pass 1: Blur X
+    // Pass 1: Invert
+    m_fboInvert->bind();
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT);
+    m_invertShader->bind();
+    m_vao->bind();
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_fboGray->texture());
+    m_invertShader->setUniformValue("uTexture", 0);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    m_vao->release();
+    m_invertShader->release();
+    m_fboInvert->release();
+    
+    // Pass 2: Blur X
     m_fboBlurX->bind();
     glViewport(0, 0, w, h);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -477,14 +548,14 @@ void FrangiGLWidget::processFrame()
     m_blurXShader->setUniformValue("uSigma", m_sigma);
     m_vao->bind();
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_fboGray->texture());
+    glBindTexture(GL_TEXTURE_2D, m_fboInvert->texture());
     m_blurXShader->setUniformValue("uTexture", 0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     m_vao->release();
     m_blurXShader->release();
     m_fboBlurX->release();
     
-    // Pass 2: Blur Y
+    // Pass 3: Blur Y
     m_fboBlurY->bind();
     glViewport(0, 0, w, h);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -499,7 +570,7 @@ void FrangiGLWidget::processFrame()
     m_blurYShader->release();
     m_fboBlurY->release();
     
-    // Pass 3: Gradients
+    // Pass 4: Gradients
     m_fboGradients->bind();
     glViewport(0, 0, w, h);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -513,7 +584,7 @@ void FrangiGLWidget::processFrame()
     m_gradientsShader->release();
     m_fboGradients->release();
     
-    // Pass 4: Hessian
+    // Pass 5: Hessian
     m_fboHessian->bind();
     glViewport(0, 0, w, h);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -527,7 +598,7 @@ void FrangiGLWidget::processFrame()
     m_hessianShader->release();
     m_fboHessian->release();
     
-    // Pass 5: Eigenvalues
+    // Pass 6: Eigenvalues
     m_fboEigenvalues->bind();
     glViewport(0, 0, w, h);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -541,7 +612,7 @@ void FrangiGLWidget::processFrame()
     m_eigenvaluesShader->release();
     m_fboEigenvalues->release();
     
-    // Pass 6: Vesselness
+    // Pass 7: Vesselness
     m_fboVesselness->bind();
     glViewport(0, 0, w, h);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -557,15 +628,29 @@ void FrangiGLWidget::processFrame()
     m_vesselnessShader->release();
     m_fboVesselness->release();
     
-    // Pass 7: Final visualization to screen
+    // Pass 8: Final visualization to screen
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
     glViewport(0, 0, width(), height());
     glClear(GL_COLOR_BUFFER_BIT);
     
+    // Выбираем какую текстуру показывать в зависимости от m_displayStage
+    GLuint textureToShow;
+    switch(m_displayStage) {
+        case 0: textureToShow = m_fboGray->texture(); break;
+        case 1: textureToShow = m_fboInvert->texture(); break;
+        case 2: textureToShow = m_fboBlurY->texture(); break;
+        case 3: textureToShow = m_fboGradients->texture(); break;
+        case 4: textureToShow = m_fboHessian->texture(); break;
+        case 5: textureToShow = m_fboEigenvalues->texture(); break;
+        case 6:
+        default: textureToShow = m_fboVesselness->texture(); break;
+    }
+    
     m_visualizeShader->bind();
+    m_visualizeShader->setUniformValue("uStage", m_displayStage);
     m_vao->bind();
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_fboVesselness->texture());
+    glBindTexture(GL_TEXTURE_2D, textureToShow);
     m_visualizeShader->setUniformValue("uTexture", 0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     m_vao->release();
