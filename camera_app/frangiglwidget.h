@@ -27,6 +27,9 @@ public:
     // Выбор отображаемого stage
     void setDisplayStage(int stage) { m_displayStage = stage; update(); }
     
+    // Включить/выключить инверсию
+    void setInvertEnabled(bool enabled) { m_invertEnabled = enabled; update(); }
+    
     // Размер изображения для шейдеров
     int getImageWidth() const { return m_fboGray ? m_fboGray->width() : 512; }
     int getImageHeight() const { return m_fboGray ? m_fboGray->height() : 512; }
@@ -76,6 +79,9 @@ private:
     
     // Какой stage показывать (0=grayscale, 1=invert, 2=blur, 3=gradients, 4=hessian, 5=eigenvalues, 6=vesselness)
     int m_displayStage;
+    
+    // Включена ли инверсия
+    bool m_invertEnabled;
 
     // Quad для рендеринга
     QOpenGLVertexArrayObject *m_vao;

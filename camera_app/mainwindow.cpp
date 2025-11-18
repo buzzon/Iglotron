@@ -87,6 +87,11 @@ MainWindow::MainWindow(QWidget *parent)
     cLayout->addWidget(cLabel);
     controlsLayout->addLayout(cLayout);
     
+    // Invert checkbox
+    invertCheckBox = new QCheckBox("Enable Invert (for dark structures)", this);
+    invertCheckBox->setChecked(true);  // По умолчанию включено
+    controlsLayout->addWidget(invertCheckBox);
+    
     // Display Stage selector
     QHBoxLayout *stageLayout = new QHBoxLayout();
     QLabel *stageTitle = new QLabel("Display Stage:", this);
@@ -122,12 +127,13 @@ MainWindow::MainWindow(QWidget *parent)
     
     setCentralWidget(centralWidget);
     
-    // Подключаем сигналы ползунков и комбобокса
+    // Подключаем сигналы ползунков, комбобокса и checkbox
     connect(sigmaSlider, &QSlider::valueChanged, this, &MainWindow::onSigmaChanged);
     connect(betaSlider, &QSlider::valueChanged, this, &MainWindow::onBetaChanged);
     connect(cSlider, &QSlider::valueChanged, this, &MainWindow::onCChanged);
     connect(stageComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::onStageChanged);
+    connect(invertCheckBox, &QCheckBox::toggled, this, &MainWindow::onInvertToggled);
     
     // Подключаем сигналы кнопок (они ничего не делают, как и требовалось)
     connect(button1, &QPushButton::clicked, this, &MainWindow::onButton1Clicked);
@@ -243,4 +249,9 @@ void MainWindow::onCChanged(int value)
 void MainWindow::onStageChanged(int index)
 {
     frangiWidget->setDisplayStage(index);
+}
+
+void MainWindow::onInvertToggled(bool checked)
+{
+    frangiWidget->setInvertEnabled(checked);
 }

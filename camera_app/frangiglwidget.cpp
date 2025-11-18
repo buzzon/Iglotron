@@ -26,6 +26,7 @@ FrangiGLWidget::FrangiGLWidget(QWidget *parent)
     , m_beta(0.5f)
     , m_c(15.0f)
     , m_displayStage(6)  // По умолчанию показываем vesselness (теперь stage 6)
+    , m_invertEnabled(true)  // По умолчанию инверсия включена
     , m_vao(nullptr)
     , m_vbo(0)
 {
@@ -526,19 +527,26 @@ void FrangiGLWidget::processFrame()
     m_grayscaleShader->release();
     m_fboGray->release();
     
-    // Pass 1: Invert
-    m_fboInvert->bind();
-    glViewport(0, 0, w, h);
-    glClear(GL_COLOR_BUFFER_BIT);
-    m_invertShader->bind();
-    m_vao->bind();
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_fboGray->texture());
-    m_invertShader->setUniformValue("uTexture", 0);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    m_vao->release();
-    m_invertShader->release();
-    m_fboInvert->release();
+    // Pass 1: Invert (опционально)
+    GLuint textureAfterInvert;
+    if (m_invertEnabled) {
+        m_fboInvert->bind();
+        glViewport(0, 0, w, h);
+        glClear(GL_COLOR_BUFFER_BIT);
+        m_invertShader->bind();
+        m_vao->bind();
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_fboGray->texture());
+        m_invertShader->setUniformValue("uTexture", 0);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        m_vao->release();
+        m_invertShader->release();
+        m_fboInvert->release();
+        textureAfterInvert = m_fboInvert->texture();
+    } else {
+        // Пропускаем инверсию, используем grayscale напрямую
+        textureAfterInvert = m_fboGray->texture();
+    }
     
     // Pass 2: Blur X
     m_fboBlurX->bind();
@@ -548,7 +556,7 @@ void FrangiGLWidget::processFrame()
     m_blurXShader->setUniformValue("uSigma", m_sigma);
     m_vao->bind();
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_fboInvert->texture());
+    glBindTexture(GL_TEXTURE_2D, textureAfterInvert);
     m_blurXShader->setUniformValue("uTexture", 0);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     m_vao->release();

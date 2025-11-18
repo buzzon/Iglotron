@@ -7,6 +7,7 @@
 #include <QSlider>
 #include <QLabel>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QMediaCaptureSession>
@@ -32,6 +33,7 @@ private slots:
     void onBetaChanged(int value);
     void onCChanged(int value);
     void onStageChanged(int index);
+    void onInvertToggled(bool checked);
 
 private:
     QCamera *camera;
@@ -50,6 +52,7 @@ private:
     QLabel *betaLabel;
     QLabel *cLabel;
     QComboBox *stageComboBox;
+    QCheckBox *invertCheckBox;
 };
 
 #endif // MAINWINDOW_H
