@@ -103,7 +103,8 @@ MainWindow::MainWindow(QWidget *parent)
     stageComboBox->addItem("4: Hessian");
     stageComboBox->addItem("5: Eigenvalues");
     stageComboBox->addItem("6: Vesselness");
-    stageComboBox->setCurrentIndex(6);  // По умолчанию Vesselness
+    stageComboBox->addItem("7: Overlay on Original");
+    stageComboBox->setCurrentIndex(7);  // По умолчанию Overlay
     stageLayout->addWidget(stageTitle);
     stageLayout->addWidget(stageComboBox);
     controlsLayout->addLayout(stageLayout);

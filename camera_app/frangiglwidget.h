@@ -56,6 +56,7 @@ private:
     QOpenGLShaderProgram *m_hessianShader;
     QOpenGLShaderProgram *m_eigenvaluesShader;
     QOpenGLShaderProgram *m_vesselnessShader;
+    QOpenGLShaderProgram *m_overlayShader;
     QOpenGLShaderProgram *m_visualizeShader;
 
     // Framebuffers для промежуточных результатов
@@ -67,6 +68,7 @@ private:
     QOpenGLFramebufferObject *m_fboHessian;
     QOpenGLFramebufferObject *m_fboEigenvalues;
     QOpenGLFramebufferObject *m_fboVesselness;
+    QOpenGLFramebufferObject *m_fboOverlay;
 
     // Входная текстура
     QOpenGLTexture *m_inputTexture;
@@ -77,7 +79,7 @@ private:
     float m_beta;
     float m_c;
     
-    // Какой stage показывать (0=grayscale, 1=invert, 2=blur, 3=gradients, 4=hessian, 5=eigenvalues, 6=vesselness)
+    // Какой stage показывать (0=grayscale, 1=invert, 2=blur, 3=gradients, 4=hessian, 5=eigenvalues, 6=vesselness, 7=overlay)
     int m_displayStage;
     
     // Включена ли инверсия

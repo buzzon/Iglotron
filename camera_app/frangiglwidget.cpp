@@ -12,6 +12,7 @@ FrangiGLWidget::FrangiGLWidget(QWidget *parent)
     , m_hessianShader(nullptr)
     , m_eigenvaluesShader(nullptr)
     , m_vesselnessShader(nullptr)
+    , m_overlayShader(nullptr)
     , m_visualizeShader(nullptr)
     , m_fboGray(nullptr)
     , m_fboInvert(nullptr)
@@ -21,11 +22,12 @@ FrangiGLWidget::FrangiGLWidget(QWidget *parent)
     , m_fboHessian(nullptr)
     , m_fboEigenvalues(nullptr)
     , m_fboVesselness(nullptr)
+    , m_fboOverlay(nullptr)
     , m_inputTexture(nullptr)
     , m_sigma(1.5f)
     , m_beta(0.5f)
     , m_c(15.0f)
-    , m_displayStage(6)  // По умолчанию показываем vesselness (теперь stage 6)
+    , m_displayStage(7)  // По умолчанию показываем overlay (stage 7)
     , m_invertEnabled(true)  // По умолчанию инверсия включена
     , m_vao(nullptr)
     , m_vbo(0)
@@ -44,6 +46,7 @@ FrangiGLWidget::~FrangiGLWidget()
     delete m_hessianShader;
     delete m_eigenvaluesShader;
     delete m_vesselnessShader;
+    delete m_overlayShader;
     delete m_visualizeShader;
     
     delete m_fboGray;
@@ -54,6 +57,7 @@ FrangiGLWidget::~FrangiGLWidget()
     delete m_fboHessian;
     delete m_fboEigenvalues;
     delete m_fboVesselness;
+    delete m_fboOverlay;
     
     delete m_inputTexture;
     delete m_vao;
@@ -396,6 +400,33 @@ void FrangiGLWidget::createShaders()
     )");
     m_vesselnessShader->link();
     
+    // Overlay shader - накладывает vesselness на исходное изображение
+    m_overlayShader = new QOpenGLShaderProgram(this);
+    m_overlayShader->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader);
+    m_overlayShader->addShaderFromSourceCode(QOpenGLShader::Fragment, R"(
+        #version 330 core
+        in vec2 vUv;
+        out vec4 FragColor;
+        uniform sampler2D uOriginal;
+        uniform sampler2D uVesselness;
+        
+        void main() {
+            vec4 original = texture(uOriginal, vUv);
+            float vessel = texture(uVesselness, vUv).x;
+            
+            // Просто добавляем vesselness к исходному, без усиления и clamp
+            // В белых местах получится пересвет
+            vessel = vessel * 100.0; // Усиление x100!
+            vessel = clamp(vessel, 0.0, 1.0);
+            vessel = vessel * vessel; // Мягкий контраст для лучшей видимости
+
+            vec3 overlay = original.rgb + vec3(vessel);
+            
+            FragColor = vec4(overlay, 1.0);
+        }
+    )");
+    m_overlayShader->link();
+    
     // Visualize shader
     m_visualizeShader = new QOpenGLShaderProgram(this);
     m_visualizeShader->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShader);
@@ -433,6 +464,9 @@ void FrangiGLWidget::createShaders()
                 v = clamp(v, 0.0, 1.0);
                 v = v * v; // Мягкий контраст для лучшей видимости
                 color = vec3(v);
+            } else if(uStage == 7) {
+                // Overlay: уже цветное, просто показываем как есть
+                color = texel.rgb;
             } else {
                 // Grayscale, Invert, Blur: обычная визуализация
                 float v = texel.x;
@@ -462,6 +496,7 @@ void FrangiGLWidget::recreateFramebuffers(int width, int height)
     delete m_fboHessian;
     delete m_fboEigenvalues;
     delete m_fboVesselness;
+    delete m_fboOverlay;
     
     QOpenGLFramebufferObjectFormat format;
     format.setInternalTextureFormat(GL_RGBA32F);
@@ -475,6 +510,7 @@ void FrangiGLWidget::recreateFramebuffers(int width, int height)
     m_fboHessian = new QOpenGLFramebufferObject(width, height, format);
     m_fboEigenvalues = new QOpenGLFramebufferObject(width, height, format);
     m_fboVesselness = new QOpenGLFramebufferObject(width, height, format);
+    m_fboOverlay = new QOpenGLFramebufferObject(width, height, format);
     
     qDebug() << "Framebuffers recreated with size:" << width << "x" << height;
 }
@@ -636,7 +672,29 @@ void FrangiGLWidget::processFrame()
     m_vesselnessShader->release();
     m_fboVesselness->release();
     
-    // Pass 8: Final visualization to screen
+    // Pass 8: Overlay - накладываем результат на оригинал
+    m_fboOverlay->bind();
+    glViewport(0, 0, w, h);
+    glClear(GL_COLOR_BUFFER_BIT);
+    m_overlayShader->bind();
+    m_vao->bind();
+    
+    // Привязываем оригинальное изображение к текстуре 0
+    glActiveTexture(GL_TEXTURE0);
+    m_inputTexture->bind(0);
+    m_overlayShader->setUniformValue("uOriginal", 0);
+    
+    // Привязываем vesselness к текстуре 1
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_fboVesselness->texture());
+    m_overlayShader->setUniformValue("uVesselness", 1);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    m_vao->release();
+    m_overlayShader->release();
+    m_fboOverlay->release();
+    
+    // Pass 9: Final visualization to screen
     glBindFramebuffer(GL_FRAMEBUFFER, defaultFramebufferObject());
     glViewport(0, 0, width(), height());
     glClear(GL_COLOR_BUFFER_BIT);
@@ -650,8 +708,9 @@ void FrangiGLWidget::processFrame()
         case 3: textureToShow = m_fboGradients->texture(); break;
         case 4: textureToShow = m_fboHessian->texture(); break;
         case 5: textureToShow = m_fboEigenvalues->texture(); break;
-        case 6:
-        default: textureToShow = m_fboVesselness->texture(); break;
+        case 6: textureToShow = m_fboVesselness->texture(); break;
+        case 7:
+        default: textureToShow = m_fboOverlay->texture(); break;
     }
     
     m_visualizeShader->bind();
