@@ -1,0 +1,4 @@
+# Hashes of file build rules.
+fbd53292f7c8a2f0c6f9efc283b4aac6 CMakeFiles/camera_app_autogen
+fbd53292f7c8a2f0c6f9efc283b4aac6 CMakeFiles/camera_app_autogen_timestamp_deps
+c17c713b10cd1961a7d6e6234ee43ddb camera_app_autogen/timestamp
