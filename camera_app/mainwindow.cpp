@@ -45,42 +45,42 @@ MainWindow::MainWindow(QWidget *parent)
     // Создаем панель управления параметрами
     QVBoxLayout *controlsLayout = new QVBoxLayout();
     
-    // Sigma slider (0.5 - 10.0, default 1.5)
+    // Sigma slider (0.5 - 10.0, default 1.5, step 0.01)
     QHBoxLayout *sigmaLayout = new QHBoxLayout();
     QLabel *sigmaTitle = new QLabel("Sigma (Scale):", this);
     sigmaSlider = new QSlider(Qt::Horizontal, this);
-    sigmaSlider->setMinimum(5);  // 0.5 * 10
-    sigmaSlider->setMaximum(100); // 10.0 * 10
-    sigmaSlider->setValue(15);    // 1.5 * 10
-    sigmaLabel = new QLabel("1.5", this);
+    sigmaSlider->setMinimum(50);   // 0.5 * 100
+    sigmaSlider->setMaximum(1000); // 10.0 * 100
+    sigmaSlider->setValue(150);    // 1.5 * 100
+    sigmaLabel = new QLabel("1.50", this);
     sigmaLabel->setMinimumWidth(50);
     sigmaLayout->addWidget(sigmaTitle);
     sigmaLayout->addWidget(sigmaSlider);
     sigmaLayout->addWidget(sigmaLabel);
     controlsLayout->addLayout(sigmaLayout);
     
-    // Beta (Alpha) slider (0.1 - 5.0, default 0.5)
+    // Beta (Alpha) slider (0.1 - 5.0, default 0.5, step 0.01)
     QHBoxLayout *betaLayout = new QHBoxLayout();
     QLabel *betaTitle = new QLabel("Alpha (Plate Sensitivity):", this);
     betaSlider = new QSlider(Qt::Horizontal, this);
-    betaSlider->setMinimum(1);   // 0.1 * 10
-    betaSlider->setMaximum(50);  // 5.0 * 10
-    betaSlider->setValue(5);     // 0.5 * 10
-    betaLabel = new QLabel("0.5", this);
+    betaSlider->setMinimum(10);  // 0.1 * 100
+    betaSlider->setMaximum(500); // 5.0 * 100
+    betaSlider->setValue(50);    // 0.5 * 100
+    betaLabel = new QLabel("0.50", this);
     betaLabel->setMinimumWidth(50);
     betaLayout->addWidget(betaTitle);
     betaLayout->addWidget(betaSlider);
     betaLayout->addWidget(betaLabel);
     controlsLayout->addLayout(betaLayout);
     
-    // C (Gamma) slider (0.1 - 50.0, default 15.0)
+    // C (Gamma) slider (0.1 - 50.0, default 15.0, step 0.01)
     QHBoxLayout *cLayout = new QHBoxLayout();
     QLabel *cTitle = new QLabel("Gamma (Contrast):", this);
     cSlider = new QSlider(Qt::Horizontal, this);
-    cSlider->setMinimum(1);    // 0.1 * 10
-    cSlider->setMaximum(500);  // 50.0 * 10
-    cSlider->setValue(150);    // 15.0 * 10
-    cLabel = new QLabel("15.0", this);
+    cSlider->setMinimum(10);    // 0.1 * 100
+    cSlider->setMaximum(5000);  // 50.0 * 100
+    cSlider->setValue(1500);    // 15.0 * 100
+    cLabel = new QLabel("15.00", this);
     cLabel->setMinimumWidth(50);
     cLayout->addWidget(cTitle);
     cLayout->addWidget(cSlider);
@@ -228,22 +228,22 @@ void MainWindow::onVideoFrameChanged(const QVideoFrame &frame)
 
 void MainWindow::onSigmaChanged(int value)
 {
-    float sigma = value / 10.0f;
-    sigmaLabel->setText(QString::number(sigma, 'f', 1));
+    float sigma = value / 100.0f;
+    sigmaLabel->setText(QString::number(sigma, 'f', 2));
     frangiWidget->setSigma(sigma);
 }
 
 void MainWindow::onBetaChanged(int value)
 {
-    float beta = value / 10.0f;
-    betaLabel->setText(QString::number(beta, 'f', 1));
+    float beta = value / 100.0f;
+    betaLabel->setText(QString::number(beta, 'f', 2));
     frangiWidget->setBeta(beta);
 }
 
 void MainWindow::onCChanged(int value)
 {
-    float c = value / 10.0f;
-    cLabel->setText(QString::number(c, 'f', 1));
+    float c = value / 100.0f;
+    cLabel->setText(QString::number(c, 'f', 2));
     frangiWidget->setC(c);
 }
 
