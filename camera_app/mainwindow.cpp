@@ -1,3 +1,4 @@
+#include <QProcess>
 #include "mainwindow.h"
 #include <QMessageBox>
 #include <QCameraFormat>
@@ -140,8 +141,20 @@ MainWindow::MainWindow(QWidget *parent)
     connect(button1, &QPushButton::clicked, this, &MainWindow::onButton1Clicked);
     connect(button2, &QPushButton::clicked, this, &MainWindow::onButton2Clicked);
     
-    // Настраиваем камеру
-    camera = new QCamera(this);
+    // Получаем список доступных камер и выводим их
+    QList<QCameraDevice> devices = QMediaDevices::videoInputs();
+    // QString cameraList;
+    // for (int i = 0; i < devices.size(); ++i) {
+    //     cameraList += QString("Камера %1: %2 (ID: %3)\n").arg(i).arg(devices[i].description()).arg(devices[i].id());
+    // }
+
+
+    // QMessageBox::information(this, "Доступные камеры", cameraList);
+
+    // // Настраиваем камеру (специально выбираем USB20 Camera)
+    QCameraDevice selectedDevice = devices [0];
+
+    camera = new QCamera(selectedDevice, this);
     captureSession = new QMediaCaptureSession(this);
     
     // Настраиваем формат для минимальной задержки
