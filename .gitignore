@@ -1,1 +1,5 @@
 build/
+python/
+.vs/
+.vscode/
+out/

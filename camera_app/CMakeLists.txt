@@ -5,31 +5,71 @@ project(camera_app VERSION 1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
+# Find OpenCV (должен быть в C:\opencv\build)
+set(OpenCV_DIR "C:/opencv/build" CACHE PATH "Path to OpenCV")
+find_package(OpenCV REQUIRED)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia MultimediaWidgets OpenGL OpenGLWidgets)
+# Find GLFW3
+find_package(glfw3 CONFIG REQUIRED)
+
+# Find ImGui
+find_package(imgui CONFIG REQUIRED)
+
+# Find GLAD
+find_package(glad CONFIG REQUIRED)
+
+# Find OpenGL
+find_package(OpenGL REQUIRED)
 
 add_executable(camera_app
     main.cpp
-    mainwindow.cpp
-    mainwindow.h
-    frangiglwidget.cpp
-    frangiglwidget.h
+    frangi_processor.cpp
+    frangi_processor.h
+    gl_renderer.cpp
+    gl_renderer.h
+    frangi.cpp
+    frangi.h
+    gui_manager.cpp
+    gui_manager.h
+    mask_filters.cpp
+    mask_filters.h
 )
 
-target_link_libraries(camera_app
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Widgets
-    Qt6::Multimedia
-    Qt6::MultimediaWidgets
-    Qt6::OpenGL
-    Qt6::OpenGLWidgets
+target_link_libraries(camera_app PRIVATE
+    ${OpenCV_LIBS}
+    glfw
+    imgui::imgui
+    glad::glad
+    OpenGL::GL
 )
 
-set_target_properties(camera_app PROPERTIES
-    WIN32_EXECUTABLE TRUE
-    MACOSX_BUNDLE TRUE
+target_include_directories(camera_app PRIVATE
+    ${OpenCV_INCLUDE_DIRS}
 )
+
+# Windows specific settings
+if(WIN32)
+    set_target_properties(camera_app PROPERTIES
+        WIN32_EXECUTABLE FALSE  # Keep console for debugging
+    )
+    
+    # Автоматическое копирование OpenCV DLL
+    if(EXISTS "C:/opencv/build/x64/vc16/bin")
+        add_custom_command(TARGET camera_app POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "C:/opencv/build/x64/vc16/bin/opencv_world4120.dll"
+                $<TARGET_FILE_DIR:camera_app>
+            COMMENT "Copying OpenCV DLL to output directory"
+        )
+        
+        # Для Debug конфигурации
+        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            add_custom_command(TARGET camera_app POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "C:/opencv/build/x64/vc16/bin/opencv_world4120d.dll"
+                    $<TARGET_FILE_DIR:camera_app>
+                COMMENT "Copying OpenCV Debug DLL to output directory"
+            )
+        endif()
+    endif()
+endif()
