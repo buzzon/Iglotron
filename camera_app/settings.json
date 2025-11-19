@@ -1,0 +1,26 @@
+{
+    "frangi": {
+        "sigma": 1.5,
+        "beta": 0.5,
+        "c": 15.0,
+        "displayStage": 8,
+        "invertEnabled": true,
+        "segmentationThreshold": 0.01
+    },
+    "preprocessing": {
+        "globalContrast": {
+            "enabled": false,
+            "brightness": 20.0,
+            "contrast": 3.0
+        },
+        "clahe": {
+            "enabled": false,
+            "maxIterations": 2,
+            "targetContrast": 0.3
+        }
+    },
+    "camera": {
+        "selectedIndex": 0
+    }
+}
+

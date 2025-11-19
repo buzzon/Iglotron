@@ -21,6 +21,9 @@ find_package(glad CONFIG REQUIRED)
 # Find OpenGL
 find_package(OpenGL REQUIRED)
 
+# Find nlohmann_json for settings
+find_package(nlohmann_json CONFIG REQUIRED)
+
 add_executable(camera_app
     main.cpp
     frangi_processor.cpp
@@ -33,6 +36,8 @@ add_executable(camera_app
     gui_manager.h
     mask_filters.cpp
     mask_filters.h
+    settings.cpp
+    settings.h
 )
 
 target_link_libraries(camera_app PRIVATE
@@ -41,10 +46,19 @@ target_link_libraries(camera_app PRIVATE
     imgui::imgui
     glad::glad
     OpenGL::GL
+    nlohmann_json::nlohmann_json
 )
 
 target_include_directories(camera_app PRIVATE
     ${OpenCV_INCLUDE_DIRS}
+)
+
+# Копирование settings.json в выходную директорию
+add_custom_command(TARGET camera_app POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/settings.json"
+        $<TARGET_FILE_DIR:camera_app>
+    COMMENT "Copying settings.json to output directory"
 )
 
 # Windows specific settings

@@ -15,7 +15,10 @@ public:
     
     // Обработка кадра на GPU
     cv::Mat processFrame(const cv::Mat& input, float sigma, float beta, float c, 
-                         int displayStage, bool invertEnabled);
+                         int displayStage, bool invertEnabled,
+                         bool globalContrastEnabled, float brightness, float contrast,
+                         bool claheEnabled, int claheIterations, float claheTarget,
+                         float segmentationThreshold);
     
     // Проверка доступности OpenGL
     static bool isGPUAvailable();
@@ -25,6 +28,7 @@ public:
 
 private:
     // Шейдерные программы
+    GLuint globalContrastShader;
     GLuint grayscaleShader;
     GLuint invertShader;
     GLuint blurXShader;
@@ -33,9 +37,12 @@ private:
     GLuint hessianShader;
     GLuint eigenvaluesShader;
     GLuint vesselnessShader;
+    GLuint segmentationShader;
+    GLuint overlayShader;
     GLuint visualizeShader;
     
     // Framebuffers
+    GLuint fboPreprocessed;
     GLuint fboGray;
     GLuint fboInvert;
     GLuint fboBlurX;
@@ -44,8 +51,11 @@ private:
     GLuint fboHessian;
     GLuint fboEigenvalues;
     GLuint fboVesselness;
+    GLuint fboSegmentation;
+    GLuint fboOverlay;
     
     // Текстуры для framebuffers
+    GLuint texPreprocessed;
     GLuint texGray;
     GLuint texInvert;
     GLuint texBlurX;
@@ -54,6 +64,8 @@ private:
     GLuint texHessian;
     GLuint texEigenvalues;
     GLuint texVesselness;
+    GLuint texSegmentation;
+    GLuint texOverlay;
     
     // Входная текстура
     GLuint inputTexture;

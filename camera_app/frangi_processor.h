@@ -15,7 +15,10 @@ public:
     
     // Обработка кадра (автоматически выбирает GPU или CPU)
     cv::Mat process(const cv::Mat& input, float sigma, float beta, float c,
-                    int displayStage, bool invertEnabled);
+                    int displayStage, bool invertEnabled,
+                    bool globalContrastEnabled, float brightness, float contrast,
+                    bool claheEnabled, int claheIterations, float claheTarget,
+                    float segmentationThreshold);
     
     // Проверка используется ли GPU
     bool isUsingGPU() const { return useGPU; }
@@ -29,7 +32,10 @@ private:
     
     // CPU обработка через готовый frangi.cpp
     cv::Mat processCPU(const cv::Mat& input, float sigma, float beta, float c,
-                       int displayStage, bool invertEnabled);
+                       int displayStage, bool invertEnabled,
+                       bool globalContrastEnabled, float brightness, float contrast,
+                       bool claheEnabled, int claheIterations, float claheTarget,
+                       float segmentationThreshold);
 };
 
 #endif // FRANGI_PROCESSOR_H

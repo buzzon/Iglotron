@@ -1,35 +1,55 @@
 #include "gui_manager.h"
 #include "frangi_processor.h"
+#include "settings.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include <iostream>
+#include <vector>
+#include <string>
+
+// Информация о камере
+struct CameraInfo {
+    int index;
+    std::string name;
+    int width;
+    int height;
+    double fps;
+    bool available;
+    
+    CameraInfo() : index(-1), width(0), height(0), fps(0), available(false) {}
+};
 
 // Определение структуры AppState (должно совпадать с main.cpp)
 struct AppState {
-    // Параметры Frangi фильтра
-    float sigma = 1.5f;
-    float beta = 0.5f;
-    float c = 15.0f;
-    int displayStage = 6;  // 0-6
-    bool invertEnabled = true;
+    // Параметры Frangi фильтра (загружаются из settings)
+    float sigma;
+    float beta;
+    float c;
+    int displayStage;
+    bool invertEnabled;
+    float segmentationThreshold;
     
-    // Параметры препроцессинга
-    bool globalContrastEnabled = false;
-    float globalBrightness = 20.0f;
-    float globalContrast = 3.0f;
+    // Параметры препроцессинга (загружаются из settings)
+    bool globalContrastEnabled;
+    float globalBrightness;
+    float globalContrast;
     
-    bool claheEnabled = false;
-    int claheMaxIterations = 2;
-    float claheTargetContrast = 0.3f;
+    bool claheEnabled;
+    int claheMaxIterations;
+    float claheTargetContrast;
     
     // Камера
     cv::VideoCapture camera;
     cv::Mat rawFrame;
     cv::Mat preprocessedFrame;
     cv::Mat processedFrame;
+    
+    // Список доступных камер
+    std::vector<CameraInfo> availableCameras;
+    int selectedCameraIndex = 0;  // Индекс в availableCameras, не индекс камеры!
     
     // Frangi процессор
     FrangiProcessor* processor = nullptr;
@@ -45,7 +65,15 @@ struct AppState {
     // ImGui текстуры для отображения видео
     GLuint rawFrameTexture = 0;
     GLuint processedFrameTexture = 0;
+    
+    // Настройки
+    AppSettings settings;
 };
+
+// Forward declarations функций из main.cpp
+extern void scanAvailableCameras(AppState& state);
+extern void saveStateToSettings(AppState& state);
+extern void loadSettingsToState(AppState& state);
 
 GUIManager::GUIManager() : m_initialized(false) {
 }
@@ -181,6 +209,107 @@ void GUIManager::renderControlPanel(AppState& state) {
     ImGui::Separator();
     ImGui::Spacing();
     
+    // Секция управления настройками
+    if (ImGui::CollapsingHeader("Settings Management")) {
+        ImGui::Indent();
+        
+        ImGui::Text("File: settings.json");
+        
+        if (ImGui::Button("Save Settings", ImVec2(-1, 0))) {
+            saveStateToSettings(state);
+            if (SettingsManager::saveSettings("settings.json", state.settings)) {
+                std::cout << "✓ Settings saved successfully!" << std::endl;
+            } else {
+                std::cerr << "✗ Failed to save settings!" << std::endl;
+            }
+        }
+        
+        if (ImGui::Button("Load Settings", ImVec2(-1, 0))) {
+            if (SettingsManager::loadSettings("settings.json", state.settings)) {
+                loadSettingsToState(state);
+                std::cout << "✓ Settings loaded successfully!" << std::endl;
+            } else {
+                std::cerr << "✗ Failed to load settings!" << std::endl;
+            }
+        }
+        
+        if (ImGui::Button("Reset to Defaults", ImVec2(-1, 0))) {
+            if (SettingsManager::createDefaultSettings("settings.json")) {
+                SettingsManager::loadSettings("settings.json", state.settings);
+                loadSettingsToState(state);
+                std::cout << "✓ Settings reset to defaults!" << std::endl;
+            }
+        }
+        
+        ImGui::Unindent();
+    }
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    
+    // Секция выбора камеры
+    if (ImGui::CollapsingHeader("Camera Selection", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::Indent();
+        
+        if (!state.availableCameras.empty()) {
+            // Создаем список имен камер для ComboBox
+            std::vector<const char*> cameraNames;
+            for (const auto& cam : state.availableCameras) {
+                cameraNames.push_back(cam.name.c_str());
+            }
+            
+            int previousSelection = state.selectedCameraIndex;
+            if (ImGui::Combo("Camera", &state.selectedCameraIndex, cameraNames.data(), 
+                            static_cast<int>(cameraNames.size()))) {
+                // Камера изменилась, переподключаемся
+                if (state.camera.isOpened()) {
+                    std::cout << "Switching camera from index " 
+                              << state.availableCameras[previousSelection].index 
+                              << " to " << state.availableCameras[state.selectedCameraIndex].index 
+                              << std::endl;
+                    state.camera.release();
+                    
+                    int newCameraIndex = state.availableCameras[state.selectedCameraIndex].index;
+                    state.camera.open(newCameraIndex);
+                    
+                    if (state.camera.isOpened()) {
+                        // Применяем настройки
+                        state.camera.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+                        state.camera.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+                        state.camera.set(cv::CAP_PROP_FPS, 30);
+                        state.cameraActive = true;
+                        std::cout << "Camera switched successfully!" << std::endl;
+                    } else {
+                        std::cerr << "Failed to open camera " << newCameraIndex << std::endl;
+                        state.cameraActive = false;
+                    }
+                }
+            }
+            
+            // Информация о текущей камере
+            if (state.selectedCameraIndex < state.availableCameras.size()) {
+                const auto& selectedCam = state.availableCameras[state.selectedCameraIndex];
+                ImGui::Text("Index: %d", selectedCam.index);
+                ImGui::Text("Native: %dx%d @ %.1f FPS", 
+                           selectedCam.width, selectedCam.height, selectedCam.fps);
+            }
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "No cameras detected!");
+        }
+        
+        // Кнопка для повторного сканирования
+        if (ImGui::Button("Rescan Cameras", ImVec2(-1, 0))) {
+            scanAvailableCameras(state);
+        }
+        
+        ImGui::Unindent();
+    }
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    
     // Секция препроцессинга
     renderPreprocessingSection(state);
     
@@ -239,10 +368,16 @@ void GUIManager::renderFrangiSection(AppState& state) {
             "3: Gradients",
             "4: Hessian",
             "5: Eigenvalues",
-            "6: Vesselness"
+            "6: Vesselness",
+            "7: Segmentation",
+            "8: Overlay"
         };
-        ImGui::Combo("Display Stage", &state.displayStage, stages, 7);
+        ImGui::Combo("Display Stage", &state.displayStage, stages, 9);
         ImGui::Checkbox("Enable Invert (dark structures)", &state.invertEnabled);
+        
+        ImGui::Spacing();
+        ImGui::Text("Segmentation");
+        ImGui::SliderFloat("Threshold", &state.segmentationThreshold, 0.001f, 0.1f, "%.4f");
         
         ImGui::Unindent();
     }

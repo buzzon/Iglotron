@@ -14,6 +14,34 @@ void main() {
 }
 )";
 
+// Global Contrast shader (препроцессинг)
+const char* globalContrastFragmentSrc = R"(
+#version 330 core
+in vec2 vUv;
+out vec4 FragColor;
+uniform sampler2D uTexture;
+uniform float uBrightness;
+uniform float uContrast;
+
+void main() {
+    vec4 color = texture(uTexture, vUv);
+    
+    // Центрируем относительно 0.5 (в нормализованных координатах)
+    vec3 centered = color.rgb - 0.5;
+    
+    // Масштабируем контраст
+    vec3 scaled = centered * uContrast;
+    
+    // Добавляем яркость и возвращаем к 0.5
+    vec3 result = scaled + 0.5 + (uBrightness / 255.0);
+    
+    // Клиппинг в диапазон [0, 1]
+    result = clamp(result, 0.0, 1.0);
+    
+    FragColor = vec4(result, 1.0);
+}
+)";
+
 // Grayscale shader
 const char* grayscaleFragmentSrc = R"(
 #version 330 core
@@ -218,6 +246,44 @@ void main() {
 }
 )";
 
+// Segmentation shader - бинаризация по порогу
+const char* segmentationFragmentSrc = R"(
+#version 330 core
+in vec2 vUv;
+out vec4 FragColor;
+uniform sampler2D uTexture;
+uniform float uThreshold;
+
+void main() {
+    float vesselness = texture(uTexture, vUv).x;
+    
+    // Простая бинаризация: если >= порога, то 1.0 (белый), иначе 0.0 (черный)
+    float segmented = (vesselness >= uThreshold) ? 1.0 : 0.0;
+    
+    FragColor = vec4(vec3(segmented), 1.0);
+}
+)";
+
+// Overlay shader - накладывает сегментированную маску на исходное изображение
+const char* overlayFragmentSrc = R"(
+#version 330 core
+in vec2 vUv;
+out vec4 FragColor;
+uniform sampler2D uOriginal;
+uniform sampler2D uSegmented;
+
+void main() {
+    vec4 original = texture(uOriginal, vUv);
+    float mask = texture(uSegmented, vUv).x;
+    
+    // Просто добавляем бинарную маску к исходному изображению
+    // mask уже либо 0.0 либо 1.0
+    vec3 overlay = original.rgb + vec3(mask);
+    
+    FragColor = vec4(overlay, 1.0);
+}
+)";
+
 // Visualize shader
 const char* visualizeFragmentSrc = R"(
 #version 330 core
@@ -231,29 +297,37 @@ void main() {
     vec3 color;
     
     if(uStage == 3) {
-        // Gradients: показываем magnitude градиентов с усилением
+        // Gradients: показываем magnitude градиентов с ОЧЕНЬ сильным усилением
         float gx = texel.x;
         float gy = texel.y;
         float magnitude = sqrt(gx*gx + gy*gy);
-        magnitude = magnitude * 50.0;
+        magnitude = magnitude * 50.0; // Усиление x50!
         magnitude = clamp(magnitude, 0.0, 1.0);
+        // Визуализируем gx как красный, gy как зеленый для отладки
         color = vec3(abs(gx)*50.0, abs(gy)*50.0, magnitude);
         color = clamp(color, 0.0, 1.0);
     } else if(uStage == 4 || uStage == 5) {
-        // Hessian/Eigenvalues
+        // Hessian/Eigenvalues: могут быть отрицательными, показываем abs
         float v = abs(texel.x);
-        v = v * 10.0;
+        v = v * 10.0; // Усиление
         v = clamp(v, 0.0, 1.0);
         color = vec3(v);
     } else if(uStage == 6) {
-        // Vesselness: усиление
+        // Vesselness: нужно сильное усиление т.к. значения очень маленькие
         float v = texel.x;
-        v = v * 100.0;
+        v = v * 100.0; // Усиление x100!
         v = clamp(v, 0.0, 1.0);
-        v = v * v;
+        v = v * v; // Мягкий контраст для лучшей видимости
         color = vec3(v);
+    } else if(uStage == 7) {
+        // Segmentation: бинарная маска, показываем как есть
+        float v = texel.x;
+        color = vec3(v);
+    } else if(uStage == 8) {
+        // Overlay: уже цветное, просто показываем как есть
+        color = texel.rgb;
     } else {
-        // Grayscale, Invert, Blur
+        // Grayscale, Invert, Blur: обычная визуализация
         float v = texel.x;
         v = clamp(v, 0.0, 1.0);
         color = vec3(v);
@@ -265,13 +339,13 @@ void main() {
 
 GLRenderer::GLRenderer() 
     : initialized(false), currentWidth(0), currentHeight(0),
-      grayscaleShader(0), invertShader(0), blurXShader(0), blurYShader(0),
+      globalContrastShader(0), grayscaleShader(0), invertShader(0), blurXShader(0), blurYShader(0),
       gradientsShader(0), hessianShader(0), eigenvaluesShader(0), 
-      vesselnessShader(0), visualizeShader(0),
-      fboGray(0), fboInvert(0), fboBlurX(0), fboBlurY(0),
-      fboGradients(0), fboHessian(0), fboEigenvalues(0), fboVesselness(0),
-      texGray(0), texInvert(0), texBlurX(0), texBlurY(0),
-      texGradients(0), texHessian(0), texEigenvalues(0), texVesselness(0),
+      vesselnessShader(0), segmentationShader(0), overlayShader(0), visualizeShader(0),
+      fboPreprocessed(0), fboGray(0), fboInvert(0), fboBlurX(0), fboBlurY(0),
+      fboGradients(0), fboHessian(0), fboEigenvalues(0), fboVesselness(0), fboSegmentation(0), fboOverlay(0),
+      texPreprocessed(0), texGray(0), texInvert(0), texBlurX(0), texBlurY(0),
+      texGradients(0), texHessian(0), texEigenvalues(0), texVesselness(0), texSegmentation(0), texOverlay(0),
       inputTexture(0), vao(0), vbo(0) {
 }
 
@@ -371,6 +445,7 @@ bool GLRenderer::initialize() {
     std::cout << "GLSL Version: " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
     
     // Компилируем все шейдеры
+    globalContrastShader = compileShader(vertexShaderSrc, globalContrastFragmentSrc);
     grayscaleShader = compileShader(vertexShaderSrc, grayscaleFragmentSrc);
     invertShader = compileShader(vertexShaderSrc, invertFragmentSrc);
     blurXShader = compileShader(vertexShaderSrc, blurXFragmentSrc);
@@ -379,11 +454,13 @@ bool GLRenderer::initialize() {
     hessianShader = compileShader(vertexShaderSrc, hessianFragmentSrc);
     eigenvaluesShader = compileShader(vertexShaderSrc, eigenvaluesFragmentSrc);
     vesselnessShader = compileShader(vertexShaderSrc, vesselnessFragmentSrc);
+    segmentationShader = compileShader(vertexShaderSrc, segmentationFragmentSrc);
+    overlayShader = compileShader(vertexShaderSrc, overlayFragmentSrc);
     visualizeShader = compileShader(vertexShaderSrc, visualizeFragmentSrc);
     
-    if (!grayscaleShader || !invertShader || !blurXShader || !blurYShader ||
+    if (!globalContrastShader || !grayscaleShader || !invertShader || !blurXShader || !blurYShader ||
         !gradientsShader || !hessianShader || !eigenvaluesShader || 
-        !vesselnessShader || !visualizeShader) {
+        !vesselnessShader || !segmentationShader || !overlayShader || !visualizeShader) {
         std::cerr << "Failed to compile shaders!" << std::endl;
         return false;
     }
@@ -421,16 +498,17 @@ bool GLRenderer::initialize() {
 void GLRenderer::recreateFramebuffers(int width, int height) {
     // Удаляем старые framebuffers и текстуры
     if (fboGray) {
-        GLuint fbos[] = {fboGray, fboInvert, fboBlurX, fboBlurY, 
-                         fboGradients, fboHessian, fboEigenvalues, fboVesselness};
-        glDeleteFramebuffers(8, fbos);
+        GLuint fbos[] = {fboPreprocessed, fboGray, fboInvert, fboBlurX, fboBlurY, 
+                         fboGradients, fboHessian, fboEigenvalues, fboVesselness, fboSegmentation, fboOverlay};
+        glDeleteFramebuffers(11, fbos);
         
-        GLuint textures[] = {texGray, texInvert, texBlurX, texBlurY,
-                             texGradients, texHessian, texEigenvalues, texVesselness};
-        glDeleteTextures(8, textures);
+        GLuint textures[] = {texPreprocessed, texGray, texInvert, texBlurX, texBlurY,
+                             texGradients, texHessian, texEigenvalues, texVesselness, texSegmentation, texOverlay};
+        glDeleteTextures(11, textures);
     }
     
     // Создаем новые
+    createFramebuffer(&fboPreprocessed, &texPreprocessed, width, height);
     createFramebuffer(&fboGray, &texGray, width, height);
     createFramebuffer(&fboInvert, &texInvert, width, height);
     createFramebuffer(&fboBlurX, &texBlurX, width, height);
@@ -439,6 +517,8 @@ void GLRenderer::recreateFramebuffers(int width, int height) {
     createFramebuffer(&fboHessian, &texHessian, width, height);
     createFramebuffer(&fboEigenvalues, &texEigenvalues, width, height);
     createFramebuffer(&fboVesselness, &texVesselness, width, height);
+    createFramebuffer(&fboSegmentation, &texSegmentation, width, height);
+    createFramebuffer(&fboOverlay, &texOverlay, width, height);
     
     currentWidth = width;
     currentHeight = height;
@@ -506,7 +586,10 @@ void GLRenderer::renderPass(GLuint program, GLuint targetFBO, GLuint inputTex) {
 }
 
 cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, float c,
-                                  int displayStage, bool invertEnabled) {
+                                  int displayStage, bool invertEnabled,
+                                  bool globalContrastEnabled, float brightness, float contrast,
+                                  bool claheEnabled, int claheIterations, float claheTarget,
+                                  float segmentationThreshold) {
     if (!initialized) {
         std::cerr << "GL Renderer not initialized!" << std::endl;
         return cv::Mat();
@@ -520,8 +603,22 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     // Загружаем входное изображение
     uploadTexture(input);
     
+    // Pass -1: Global Contrast (опционально, препроцессинг через GPU)
+    GLuint textureAfterPreprocessing = inputTexture;
+    
+    if (globalContrastEnabled) {
+        glUseProgram(globalContrastShader);
+        glUniform1f(glGetUniformLocation(globalContrastShader, "uBrightness"), brightness);
+        glUniform1f(glGetUniformLocation(globalContrastShader, "uContrast"), contrast);
+        glUseProgram(0);
+        renderPass(globalContrastShader, fboPreprocessed, inputTexture);
+        textureAfterPreprocessing = texPreprocessed;
+    }
+    
+    // Примечание: CLAHE применяется на CPU в frangi_processor перед вызовом этой функции
+    
     // Pass 0: Grayscale
-    renderPass(grayscaleShader, fboGray, inputTexture);
+    renderPass(grayscaleShader, fboGray, textureAfterPreprocessing);
     
     // Pass 1: Invert (опционально)
     GLuint textureAfterInvert;
@@ -560,6 +657,49 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     glUseProgram(0);
     renderPass(vesselnessShader, fboVesselness, texEigenvalues);
     
+    // Pass 8: Segmentation - бинаризация по порогу
+    glBindFramebuffer(GL_FRAMEBUFFER, fboSegmentation);
+    glViewport(0, 0, currentWidth, currentHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    glUseProgram(segmentationShader);
+    glUniform1f(glGetUniformLocation(segmentationShader, "uThreshold"), segmentationThreshold);
+    glBindVertexArray(vao);
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texVesselness);
+    glUniform1i(glGetUniformLocation(segmentationShader, "uTexture"), 0);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
+    // Pass 9: Overlay - накладываем сегментированную маску на оригинал
+    glBindFramebuffer(GL_FRAMEBUFFER, fboOverlay);
+    glViewport(0, 0, currentWidth, currentHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    glUseProgram(overlayShader);
+    glBindVertexArray(vao);
+    
+    // Привязываем оригинальное изображение к текстуре 0
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, inputTexture);
+    glUniform1i(glGetUniformLocation(overlayShader, "uOriginal"), 0);
+    
+    // Привязываем сегментированную маску к текстуре 1
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texSegmentation);
+    glUniform1i(glGetUniformLocation(overlayShader, "uSegmented"), 1);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
     // Выбираем какую текстуру вернуть
     GLuint textureToShow;
     switch(displayStage) {
@@ -569,8 +709,10 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
         case 3: textureToShow = texGradients; break;
         case 4: textureToShow = texHessian; break;
         case 5: textureToShow = texEigenvalues; break;
-        case 6:
-        default: textureToShow = texVesselness; break;
+        case 6: textureToShow = texVesselness; break;
+        case 7: textureToShow = texSegmentation; break;
+        case 8:
+        default: textureToShow = texOverlay; break;
     }
     
     // Применяем визуализацию (для усиления контраста)
@@ -584,6 +726,7 @@ void GLRenderer::cleanup() {
     if (!initialized) return;
     
     // Удаляем шейдеры
+    if (globalContrastShader) glDeleteProgram(globalContrastShader);
     if (grayscaleShader) glDeleteProgram(grayscaleShader);
     if (invertShader) glDeleteProgram(invertShader);
     if (blurXShader) glDeleteProgram(blurXShader);
@@ -592,17 +735,19 @@ void GLRenderer::cleanup() {
     if (hessianShader) glDeleteProgram(hessianShader);
     if (eigenvaluesShader) glDeleteProgram(eigenvaluesShader);
     if (vesselnessShader) glDeleteProgram(vesselnessShader);
+    if (segmentationShader) glDeleteProgram(segmentationShader);
+    if (overlayShader) glDeleteProgram(overlayShader);
     if (visualizeShader) glDeleteProgram(visualizeShader);
     
     // Удаляем framebuffers и текстуры
     if (fboGray) {
-        GLuint fbos[] = {fboGray, fboInvert, fboBlurX, fboBlurY,
-                         fboGradients, fboHessian, fboEigenvalues, fboVesselness};
-        glDeleteFramebuffers(8, fbos);
+        GLuint fbos[] = {fboPreprocessed, fboGray, fboInvert, fboBlurX, fboBlurY,
+                         fboGradients, fboHessian, fboEigenvalues, fboVesselness, fboSegmentation, fboOverlay};
+        glDeleteFramebuffers(11, fbos);
         
-        GLuint textures[] = {texGray, texInvert, texBlurX, texBlurY,
-                             texGradients, texHessian, texEigenvalues, texVesselness};
-        glDeleteTextures(8, textures);
+        GLuint textures[] = {texPreprocessed, texGray, texInvert, texBlurX, texBlurY,
+                             texGradients, texHessian, texEigenvalues, texVesselness, texSegmentation, texOverlay};
+        glDeleteTextures(11, textures);
     }
     
     if (inputTexture) glDeleteTextures(1, &inputTexture);

@@ -1,4 +1,5 @@
 #include "frangi_processor.h"
+#include "mask_filters.h"
 #include <iostream>
 
 FrangiProcessor::FrangiProcessor() : glRenderer(nullptr), useGPU(false) {
@@ -35,22 +36,69 @@ bool FrangiProcessor::initialize() {
 }
 
 cv::Mat FrangiProcessor::process(const cv::Mat& input, float sigma, float beta, float c,
-                                  int displayStage, bool invertEnabled) {
+                                  int displayStage, bool invertEnabled,
+                                  bool globalContrastEnabled, float brightness, float contrast,
+                                  bool claheEnabled, int claheIterations, float claheTarget,
+                                  float segmentationThreshold) {
+    // CLAHE всегда применяется на CPU (перед GPU или CPU обработкой)
+    cv::Mat preprocessed = input.clone();
+    
+    if (claheEnabled) {
+        MaskFilters filters;
+        // Конвертируем в grayscale если нужно
+        if (preprocessed.channels() == 3) {
+            cv::cvtColor(preprocessed, preprocessed, cv::COLOR_BGR2GRAY);
+            preprocessed = filters.applyClahe(preprocessed, claheIterations, claheTarget);
+            cv::cvtColor(preprocessed, preprocessed, cv::COLOR_GRAY2BGR);
+        } else {
+            preprocessed = filters.applyClahe(preprocessed, claheIterations, claheTarget);
+        }
+    }
+    
     if (useGPU && glRenderer) {
-        return glRenderer->processFrame(input, sigma, beta, c, displayStage, invertEnabled);
+        // GPU: Global Contrast через shader, CLAHE уже применен выше
+        return glRenderer->processFrame(preprocessed, sigma, beta, c, displayStage, invertEnabled,
+                                       globalContrastEnabled, brightness, contrast,
+                                       false, 0, 0.0f, segmentationThreshold);  // CLAHE уже применен
     } else {
-        return processCPU(input, sigma, beta, c, displayStage, invertEnabled);
+        // CPU: все через MaskFilters
+        return processCPU(preprocessed, sigma, beta, c, displayStage, invertEnabled,
+                         globalContrastEnabled, brightness, contrast,
+                         false, 0, 0.0f, segmentationThreshold);  // CLAHE уже применен
     }
 }
 
 cv::Mat FrangiProcessor::processCPU(const cv::Mat& input, float sigma, float beta, float c,
-                                     int displayStage, bool invertEnabled) {
+                                     int displayStage, bool invertEnabled,
+                                     bool globalContrastEnabled, float brightness, float contrast,
+                                     bool claheEnabled, int claheIterations, float claheTarget,
+                                     float segmentationThreshold) {
+    // Препроцессинг на CPU
+    cv::Mat preprocessed = input.clone();
+    
+    if (globalContrastEnabled || claheEnabled) {
+        MaskFilters filters;
+        
+        // Конвертируем в grayscale если нужно
+        if (preprocessed.channels() == 3) {
+            cv::cvtColor(preprocessed, preprocessed, cv::COLOR_BGR2GRAY);
+        }
+        
+        if (globalContrastEnabled) {
+            preprocessed = filters.applyGlobalContrast(preprocessed, brightness, contrast);
+        }
+        
+        if (claheEnabled) {
+            preprocessed = filters.applyClahe(preprocessed, claheIterations, claheTarget);
+        }
+    }
+    
     // Конвертируем в grayscale float32
     cv::Mat gray;
-    if (input.channels() == 3) {
-        cv::cvtColor(input, gray, cv::COLOR_BGR2GRAY);
+    if (preprocessed.channels() == 3) {
+        cv::cvtColor(preprocessed, gray, cv::COLOR_BGR2GRAY);
     } else {
-        gray = input.clone();
+        gray = preprocessed.clone();
     }
     gray.convertTo(gray, CV_32FC1, 1.0 / 255.0);
     
@@ -95,8 +143,8 @@ cv::Mat FrangiProcessor::processCPU(const cv::Mat& input, float sigma, float bet
         return magnitude;
     }
     
-    // Stage 6: Vesselness - используем вашу готовую реализацию frangi2d()
-    if (displayStage == 6) {
+    // Stages 6-8: Frangi и сегментация
+    if (displayStage >= 6) {
         frangi2d_opts_t opts;
         frangi2d_createopts(&opts);
         opts.sigma_start = sigma;
@@ -115,13 +163,47 @@ cv::Mat FrangiProcessor::processCPU(const cv::Mat& input, float sigma, float bet
             return cv::Mat::zeros(input.size(), CV_8U);
         }
         
-        // Усиление и контраст (как в GPU версии)
-        cv::Mat result;
-        vesselness = vesselness * 100.0;
-        vesselness = vesselness.mul(vesselness);
-        vesselness.convertTo(result, CV_8U, 255.0);
+        // Stage 6: Vesselness (raw probabilities with enhancement for visualization)
+        if (displayStage == 6) {
+            cv::Mat result;
+            vesselness = vesselness * 100.0;
+            vesselness = vesselness.mul(vesselness);
+            vesselness.convertTo(result, CV_8U, 255.0);
+            return result;
+        }
         
-        return result;
+        // Stage 7: Segmentation (binary mask)
+        cv::Mat segmented;
+        cv::threshold(vesselness, segmented, segmentationThreshold, 1.0, cv::THRESH_BINARY);
+        
+        if (displayStage == 7) {
+            cv::Mat result;
+            segmented.convertTo(result, CV_8U, 255.0);
+            return result;
+        }
+        
+        // Stage 8: Overlay (binary mask on original)
+        if (displayStage == 8) {
+            cv::Mat result;
+            
+            // Конвертируем оригинал в float RGB
+            cv::Mat original;
+            if (input.channels() == 3) {
+                input.convertTo(original, CV_32F, 1.0 / 255.0);
+            } else {
+                cv::Mat temp;
+                cv::cvtColor(input, temp, cv::COLOR_GRAY2BGR);
+                temp.convertTo(original, CV_32F, 1.0 / 255.0);
+            }
+            
+            // Добавляем маску (белые вены на оригинале)
+            cv::Mat mask3ch;
+            cv::merge(std::vector<cv::Mat>(3, segmented), mask3ch);
+            original += mask3ch;
+            
+            original.convertTo(result, CV_8U, 255.0);
+            return result;
+        }
     }
     
     // Stages 4-5: вычисляем промежуточные результаты
