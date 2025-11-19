@@ -32,6 +32,12 @@ The `settings.json` file should be located in the same directory as the executab
     },
     "camera": {
         "selectedIndex": 0                 // Index in available cameras list
+    },
+    "approval": {
+        "enabled": false,                  // Enable injection approval mask
+        "maskHeight": 100,                 // Mask height in pixels (50 - 300)
+        "maskWidth": 200,                  // Mask width in pixels (50 - 400)
+        "threshold": 0.5                   // Min vessel ratio for approval (0.0 - 1.0)
     }
 }
 ```
@@ -63,6 +69,29 @@ The `settings.json` file should be located in the same directory as the executab
 
 You can edit `settings.json` with any text editor while the application is not running.
 The file will be validated on load, and any missing parameters will use default values.
+
+## Injection Approval
+
+The **Injection Approval** feature displays a semi-transparent colored region at the bottom-center of the video:
+
+- **🟢 Green tinted area**: Safe to inject (vessel ratio ≥ threshold) - shows "APPROVED"
+- **⚫ Gray tinted area**: NOT safe to inject (vessel ratio < threshold) - shows "NOT SAFE"
+
+The region shows:
+- Percentage of vessel pixels detected within the area
+- Approval status text
+- Color-coded border (green or gray)
+
+This helps determine if there is sufficient vasculature for safe needle insertion.
+
+**Visual Behavior:**
+- Initially: Gray tint (default state)
+- When approved: Changes to green tint
+- Real-time: Updates as vessels are detected
+
+**Settings:**
+- `maskHeight`, `maskWidth`: Size of the approval region in pixels
+- `threshold`: Minimum ratio of vessel pixels required for approval (default: 0.5 = 50%)
 
 ## Default Values
 

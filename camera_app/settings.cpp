@@ -54,6 +54,19 @@ bool SettingsManager::loadSettings(const std::string& filename, AppSettings& set
             if (camera.contains("selectedIndex")) settings.selectedCameraIndex = camera["selectedIndex"];
         }
         
+        // Approval parameters
+        if (j.contains("approval")) {
+            auto& approval = j["approval"];
+            if (approval.contains("enabled")) settings.approvalEnabled = approval["enabled"];
+            if (approval.contains("maskHeight")) settings.approvalMaskHeight = approval["maskHeight"];
+            if (approval.contains("maskWidth")) settings.approvalMaskWidth = approval["maskWidth"];
+            if (approval.contains("threshold")) settings.approvalThreshold = approval["threshold"];
+            
+            std::cout << "  Approval: enabled=" << settings.approvalEnabled 
+                      << ", mask=" << settings.approvalMaskWidth << "x" << settings.approvalMaskHeight
+                      << ", threshold=" << settings.approvalThreshold << std::endl;
+        }
+        
         std::cout << "Settings loaded successfully from: " << filename << std::endl;
         return true;
         
@@ -96,6 +109,14 @@ bool SettingsManager::saveSettings(const std::string& filename, const AppSetting
             {"selectedIndex", settings.selectedCameraIndex}
         };
         
+        // Approval parameters
+        j["approval"] = {
+            {"enabled", settings.approvalEnabled},
+            {"maskHeight", settings.approvalMaskHeight},
+            {"maskWidth", settings.approvalMaskWidth},
+            {"threshold", settings.approvalThreshold}
+        };
+        
         std::ofstream file(filename);
         if (!file.is_open()) {
             std::cerr << "Failed to open file for writing: " << filename << std::endl;
@@ -105,6 +126,9 @@ bool SettingsManager::saveSettings(const std::string& filename, const AppSetting
         file << j.dump(4); // Pretty print with 4 spaces
         
         std::cout << "Settings saved successfully to: " << filename << std::endl;
+        std::cout << "  Approval: enabled=" << settings.approvalEnabled 
+                  << ", mask=" << settings.approvalMaskWidth << "x" << settings.approvalMaskHeight
+                  << ", threshold=" << settings.approvalThreshold << std::endl;
         return true;
         
     } catch (const std::exception& e) {

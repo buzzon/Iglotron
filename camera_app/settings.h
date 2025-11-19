@@ -25,6 +25,12 @@ struct AppSettings {
     // Камера
     int selectedCameraIndex = 0;
     
+    // Аппрувинг (injection window)
+    bool approvalEnabled = false;
+    int approvalMaskHeight = 100;
+    int approvalMaskWidth = 200;
+    float approvalThreshold = 0.5f;
+    
     // Пути к файлам
     std::string settingsFile = "settings.json";
 };

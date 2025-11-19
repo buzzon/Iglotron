@@ -66,6 +66,13 @@ struct AppState {
     GLuint rawFrameTexture = 0;
     GLuint processedFrameTexture = 0;
     
+    // Аппрувинг (injection window)
+    bool approvalEnabled;
+    int approvalMaskHeight;
+    int approvalMaskWidth;
+    float approvalThreshold;
+    float approvalRatio = 0.0f;
+    
     // Настройки
     AppSettings settings;
 };
@@ -345,6 +352,43 @@ void GUIManager::renderPreprocessingSection(AppState& state) {
             ImGui::SliderInt("Max Iterations", &state.claheMaxIterations, 1, 5);
             ImGui::SliderFloat("Target Contrast", &state.claheTargetContrast, 0.0f, 0.9f, "%.2f");
             ImGui::Unindent();
+        }
+        
+        ImGui::Unindent();
+    }
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    
+    // Секция аппрувинга (Injection Window Approval)
+    if (ImGui::CollapsingHeader("Injection Approval")) {
+        ImGui::Indent();
+        
+        ImGui::Checkbox("Enable Approval Mask", &state.approvalEnabled);
+        
+        if (state.approvalEnabled) {
+            ImGui::Spacing();
+            ImGui::Text("Mask Size (pixels)");
+            ImGui::SliderInt("Height##approval", &state.approvalMaskHeight, 50, 300);
+            ImGui::SliderInt("Width##approval", &state.approvalMaskWidth, 50, 400);
+            
+            ImGui::Spacing();
+            ImGui::Text("Approval Threshold");
+            ImGui::SliderFloat("Min Vessel Ratio", &state.approvalThreshold, 0.0f, 1.0f, "%.2f");
+            ImGui::Text("Current ratio: %.1f%%", state.approvalRatio * 100.0f);
+            
+            // Индикатор состояния
+            ImGui::Spacing();
+            if (state.approvalRatio >= state.approvalThreshold) {
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "✓ APPROVED - Safe to inject");
+            } else {
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "✗ NOT APPROVED - Do not inject");
+            }
+            
+            ImGui::Spacing();
+            ImGui::TextWrapped("Mask position: center-bottom");
+            ImGui::TextWrapped("Green = approved, Red = not approved");
         }
         
         ImGui::Unindent();

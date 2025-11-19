@@ -9,6 +9,8 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <sstream>
+#include <iomanip>
 
 // Информация о камере
 struct CameraInfo {
@@ -66,6 +68,13 @@ struct AppState {
     GLuint rawFrameTexture = 0;
     GLuint processedFrameTexture = 0;
     
+    // Аппрувинг (injection window)
+    bool approvalEnabled;
+    int approvalMaskHeight;
+    int approvalMaskWidth;
+    float approvalThreshold;
+    float approvalRatio = 0.0f;  // Текущее соотношение сосудов
+    
     // Настройки
     AppSettings settings;
 };
@@ -88,6 +97,11 @@ void loadSettingsToState(AppState& state) {
     state.claheTargetContrast = state.settings.claheTargetContrast;
     
     state.selectedCameraIndex = state.settings.selectedCameraIndex;
+    
+    state.approvalEnabled = state.settings.approvalEnabled;
+    state.approvalMaskHeight = state.settings.approvalMaskHeight;
+    state.approvalMaskWidth = state.settings.approvalMaskWidth;
+    state.approvalThreshold = state.settings.approvalThreshold;
 }
 
 // Сохранить текущие значения в настройки
@@ -108,6 +122,110 @@ void saveStateToSettings(AppState& state) {
     state.settings.claheTargetContrast = state.claheTargetContrast;
     
     state.settings.selectedCameraIndex = state.selectedCameraIndex;
+    
+    state.settings.approvalEnabled = state.approvalEnabled;
+    state.settings.approvalMaskHeight = state.approvalMaskHeight;
+    state.settings.approvalMaskWidth = state.approvalMaskWidth;
+    state.settings.approvalThreshold = state.approvalThreshold;
+};
+
+// Вычислить координаты маски аппрувинга (центр-снизу)
+void computeApprovalMaskCoords(int imageHeight, int imageWidth, 
+                               int maskHeight, int maskWidth,
+                               int& y, int& x) {
+    y = imageHeight - maskHeight;
+    x = (imageWidth - maskWidth) / 2;
+}
+
+// Вычислить соотношение сосудов в маске аппрувинга
+float computeApprovalRatio(const cv::Mat& segmentedFrame, 
+                           int maskY, int maskX, 
+                           int maskHeight, int maskWidth) {
+    if (segmentedFrame.empty() || 
+        maskY < 0 || maskX < 0 ||
+        maskY + maskHeight > segmentedFrame.rows ||
+        maskX + maskWidth > segmentedFrame.cols) {
+        return 0.0f;
+    }
+    
+    // Берем ROI из сегментированного кадра (бинарная маска)
+    cv::Rect roi(maskX, maskY, maskWidth, maskHeight);
+    cv::Mat maskRegion = segmentedFrame(roi);
+    
+    // Считаем белые пиксели (вены)
+    int vesselsPixels = cv::countNonZero(maskRegion);
+    int totalPixels = maskRegion.rows * maskRegion.cols;
+    
+    return totalPixels > 0 ? static_cast<float>(vesselsPixels) / totalPixels : 0.0f;
+}
+
+// Нарисовать маску аппрувинга на кадре
+void drawApprovalMask(cv::Mat& frame, int maskY, int maskX, 
+                      int maskHeight, int maskWidth, 
+                      float ratio, float threshold) {
+    if (frame.empty() || 
+        maskY < 0 || maskX < 0 ||
+        maskY + maskHeight > frame.rows ||
+        maskX + maskWidth > frame.cols) {
+        return;
+    }
+    
+    cv::Rect rect(maskX, maskY, maskWidth, maskHeight);
+    cv::Mat roi = frame(rect);
+    
+    // Определяем цвет: зеленый если approved, серый если нет
+    cv::Scalar tintColor;
+    if (ratio >= threshold) {
+        tintColor = cv::Scalar(0, 255, 0);  // Зеленый (BGR) - approved
+    } else {
+        tintColor = cv::Scalar(128, 128, 128);  // Серый (BGR) - не approved
+    }
+    
+    // Применяем цветовой оттенок к области
+    cv::Mat coloredRoi = roi.clone();
+    cv::Mat tintMask(roi.size(), roi.type(), tintColor);
+    
+    // Смешивание: 70% оригинал + 30% цветовой оттенок
+    double alpha = 0.3;
+    cv::addWeighted(coloredRoi, 1.0 - alpha, tintMask, alpha, 0, roi);
+    
+    // Рисуем границу маски
+    cv::Scalar borderColor = (ratio >= threshold) ? 
+        cv::Scalar(0, 255, 0) :    // Зеленая граница
+        cv::Scalar(128, 128, 128); // Серая граница
+    cv::rectangle(frame, rect, borderColor, 3);
+    
+    // Добавляем текст с процентом и статусом
+    std::stringstream ss;
+    ss << std::fixed << std::setprecision(1) << (ratio * 100.0f) << "%";
+    std::string text = ss.str();
+    
+    // Статус текст
+    std::string statusText = (ratio >= threshold) ? "APPROVED" : "NOT SAFE";
+    
+    int baseline = 0;
+    cv::Size textSize = cv::getTextSize(text, cv::FONT_HERSHEY_SIMPLEX, 0.8, 2, &baseline);
+    cv::Size statusSize = cv::getTextSize(statusText, cv::FONT_HERSHEY_SIMPLEX, 0.6, 2, &baseline);
+    
+    // Позиция для процентов (центр маски)
+    cv::Point textPos(maskX + (maskWidth - textSize.width) / 2, 
+                     maskY + (maskHeight - 10) / 2);
+    
+    // Позиция для статуса (под процентами)
+    cv::Point statusPos(maskX + (maskWidth - statusSize.width) / 2,
+                       maskY + (maskHeight + statusSize.height) / 2 + 15);
+    
+    // Текст с тенью для читаемости - проценты
+    cv::putText(frame, text, textPos + cv::Point(2, 2), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 0, 0), 4);
+    cv::putText(frame, text, textPos, 
+                cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(255, 255, 255), 2);
+    
+    // Текст статуса
+    cv::putText(frame, statusText, statusPos + cv::Point(2, 2), 
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 0, 0), 3);
+    cv::putText(frame, statusText, statusPos, 
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, borderColor, 2);
 };
 
 void errorCallback(int error, const char* description) {
@@ -281,6 +399,45 @@ void processFrame(AppState& state, MaskFilters& filters) {
             state.claheTargetContrast,
             state.segmentationThreshold
         );
+    }
+    
+    // Аппрувинг (если включен)
+    if (state.approvalEnabled && !state.processedFrame.empty()) {
+        // Получаем сегментированную маску (stage 7)
+        cv::Mat segmentedMask;
+        if (state.processor) {
+            segmentedMask = state.processor->process(
+                state.rawFrame, 
+                state.sigma, 
+                state.beta, 
+                state.c,
+                7,  // Stage 7 = Segmentation
+                state.invertEnabled,
+                state.globalContrastEnabled,
+                state.globalBrightness,
+                state.globalContrast,
+                state.claheEnabled,
+                state.claheMaxIterations,
+                state.claheTargetContrast,
+                state.segmentationThreshold
+            );
+        }
+        
+        // Вычисляем координаты маски
+        int maskY, maskX;
+        computeApprovalMaskCoords(state.processedFrame.rows, state.processedFrame.cols,
+                                 state.approvalMaskHeight, state.approvalMaskWidth,
+                                 maskY, maskX);
+        
+        // Вычисляем соотношение сосудов
+        state.approvalRatio = computeApprovalRatio(segmentedMask, maskY, maskX,
+                                                   state.approvalMaskHeight, 
+                                                   state.approvalMaskWidth);
+        
+        // Рисуем маску на обработанном кадре
+        drawApprovalMask(state.processedFrame, maskY, maskX,
+                        state.approvalMaskHeight, state.approvalMaskWidth,
+                        state.approvalRatio, state.approvalThreshold);
     }
 }
 

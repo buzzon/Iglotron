@@ -21,6 +21,12 @@
     },
     "camera": {
         "selectedIndex": 0
+    },
+    "approval": {
+        "enabled": false,
+        "maskHeight": 100,
+        "maskWidth": 200,
+        "threshold": 0.5
     }
 }
 
