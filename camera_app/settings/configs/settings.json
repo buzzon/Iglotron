@@ -3,7 +3,7 @@
         "sigma": 1.5,
         "beta": 0.5,
         "c": 15.0,
-        "displayStage": 8,
+        "displayStage": 7,
         "invertEnabled": true,
         "segmentationThreshold": 0.01
     },

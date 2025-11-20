@@ -1,11 +1,30 @@
 #include "gl_renderer.h"
+
+#include <cmath>
 #include <iostream>
+#include <vector>
+#include <algorithm>
+
+// Windows (MSVC)
+#define _USE_MATH_DEFINES
+#include <math.h>
+
+// Fallback
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+// ============================================================================
+// SHADER SOURCES
+// ============================================================================
 
 // Вершинный шейдер (общий для всех проходов)
 const char* vertexShaderSrc = R"(
 #version 330 core
+
 layout(location = 0) in vec2 position;
 layout(location = 1) in vec2 texCoord;
+
 out vec2 vUv;
 
 void main() {
@@ -17,8 +36,10 @@ void main() {
 // Global Contrast shader (препроцессинг)
 const char* globalContrastFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
+
 uniform sampler2D uTexture;
 uniform float uBrightness;
 uniform float uContrast;
@@ -45,8 +66,10 @@ void main() {
 // Grayscale shader
 const char* grayscaleFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
+
 uniform sampler2D uTexture;
 
 void main() {
@@ -59,8 +82,10 @@ void main() {
 // Invert shader
 const char* invertFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
+
 uniform sampler2D uTexture;
 
 void main() {
@@ -70,155 +95,137 @@ void main() {
 }
 )";
 
-// Blur X shader
-const char* blurXFragmentSrc = R"(
+// ============================================================================
+// НОВЫЙ УНИВЕРСАЛЬНЫЙ ШЕЙДЕР 1D СВЕРТКИ
+// ============================================================================
+
+const char* convolve1DFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
+
 uniform sampler2D uTexture;
+uniform float uKernel[64];  // Максимум 64 коэффициента (до sigma=10)
+uniform int uKernelSize;
+uniform int uDirection;  // 0 = horizontal, 1 = vertical
+
+void main() {
+    vec2 texSize = vec2(textureSize(uTexture, 0));
+    vec2 onePixel = 1.0 / texSize;
+    
+    int halfSize = uKernelSize / 2;
+    float result = 0.0;
+    
+    for (int i = 0; i < uKernelSize; i++) {
+        int offset = i - halfSize;
+        vec2 samplePos;
+        
+        if (uDirection == 0) {
+            // Horizontal
+            samplePos = vUv + vec2(float(offset) * onePixel.x, 0.0);
+        } else {
+            // Vertical
+            samplePos = vUv + vec2(0.0, float(offset) * onePixel.y);
+        }
+        
+        float sample = texture(uTexture, samplePos).x;
+        result += sample * uKernel[i];
+    }
+    
+    FragColor = vec4(result, 0.0, 0.0, 1.0);
+}
+)";
+
+// ============================================================================
+// SCALE NORMALIZATION SHADER
+// ============================================================================
+
+const char* scaleNormalizationFragmentSrc = R"(
+#version 330 core
+
+in vec2 vUv;
+out vec4 FragColor;
+
+uniform sampler2D uDxx;
+uniform sampler2D uDyy;
+uniform sampler2D uDxy;
 uniform float uSigma;
 
 void main() {
-    vec2 texSize = vec2(textureSize(uTexture, 0));
-    float h = 1.0 / texSize.x;
-    vec4 sum = vec4(0.0);
-    float totalWeight = 0.0;
+    float dxx = texture(uDxx, vUv).x;
+    float dyy = texture(uDyy, vUv).x;
+    float dxy = texture(uDxy, vUv).x;
     
-    for(int i = -15; i <= 15; i++) {
-        float offset = float(i) * h;
-        float weight = exp(-float(i*i) / (2.0 * uSigma * uSigma));
-        sum += texture(uTexture, vUv + vec2(offset, 0.0)) * weight;
-        totalWeight += weight;
-    }
+    // Scale normalization (gamma = 2)
+    float sigma2 = uSigma * uSigma;
     
-    FragColor = sum / totalWeight;
+    dxx *= sigma2;
+    dyy *= sigma2;
+    dxy *= sigma2;
+    
+    // Выходной формат: RGB = (Dxx, Dxy, Dyy)
+    FragColor = vec4(dxx, dxy, dyy, 1.0);
 }
 )";
 
-// Blur Y shader
-const char* blurYFragmentSrc = R"(
-#version 330 core
-in vec2 vUv;
-out vec4 FragColor;
-uniform sampler2D uTexture;
-uniform float uSigma;
+// ============================================================================
+// EIGENVALUES SHADER (исправленный)
+// ============================================================================
 
-void main() {
-    vec2 texSize = vec2(textureSize(uTexture, 0));
-    float h = 1.0 / texSize.y;
-    vec4 sum = vec4(0.0);
-    float totalWeight = 0.0;
-    
-    for(int i = -15; i <= 15; i++) {
-        float offset = float(i) * h;
-        float weight = exp(-float(i*i) / (2.0 * uSigma * uSigma));
-        sum += texture(uTexture, vUv + vec2(0.0, offset)) * weight;
-        totalWeight += weight;
-    }
-    
-    FragColor = sum / totalWeight;
-}
-)";
-
-// Gradients shader (Sobel)
-const char* gradientsFragmentSrc = R"(
-#version 330 core
-in vec2 vUv;
-out vec4 FragColor;
-uniform sampler2D uTexture;
-
-void main() {
-    vec2 texSize = vec2(textureSize(uTexture, 0));
-    float h = 1.0 / texSize.x;
-    
-    // Sobel X
-    float gx = texture(uTexture, vUv + vec2(-h, -h)).x * -1.0;
-    gx += texture(uTexture, vUv + vec2(-h, 0.0)).x * -2.0;
-    gx += texture(uTexture, vUv + vec2(-h, h)).x * -1.0;
-    gx += texture(uTexture, vUv + vec2(h, -h)).x * 1.0;
-    gx += texture(uTexture, vUv + vec2(h, 0.0)).x * 2.0;
-    gx += texture(uTexture, vUv + vec2(h, h)).x * 1.0;
-    gx /= 8.0;
-    
-    // Sobel Y
-    float gy = texture(uTexture, vUv + vec2(-h, -h)).x * -1.0;
-    gy += texture(uTexture, vUv + vec2(0.0, -h)).x * -2.0;
-    gy += texture(uTexture, vUv + vec2(h, -h)).x * -1.0;
-    gy += texture(uTexture, vUv + vec2(-h, h)).x * 1.0;
-    gy += texture(uTexture, vUv + vec2(0.0, h)).x * 2.0;
-    gy += texture(uTexture, vUv + vec2(h, h)).x * 1.0;
-    gy /= 8.0;
-    
-    FragColor = vec4(gx, gy, 0.0, 1.0);
-}
-)";
-
-// Hessian shader
-const char* hessianFragmentSrc = R"(
-#version 330 core
-in vec2 vUv;
-out vec4 FragColor;
-uniform sampler2D uTexture;
-
-void main() {
-    vec2 texSize = vec2(textureSize(uTexture, 0));
-    float h = 2.0 / texSize.x;
-    
-    vec4 c = texture(uTexture, vUv);
-    vec4 px = texture(uTexture, vUv + vec2(h, 0.0));
-    vec4 nx = texture(uTexture, vUv - vec2(h, 0.0));
-    vec4 py = texture(uTexture, vUv + vec2(0.0, h));
-    vec4 ny = texture(uTexture, vUv - vec2(0.0, h));
-    
-    float fxx = (px.x - nx.x) / (2.0 * h);
-    float fyy = (py.y - ny.y) / (2.0 * h);
-    float fxy = (py.x - ny.x) / (2.0 * h);
-    
-    FragColor = vec4(fxx, fxy, fyy, 1.0);
-}
-)";
-
-// Eigenvalues shader
 const char* eigenvaluesFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
-uniform sampler2D uTexture;
+
+uniform sampler2D uTexture;  // (Dxx, Dxy, Dyy)
 
 void main() {
-    vec4 h = texture(uTexture, vUv);
-    float fxx = h.x;
-    float fxy = h.y;
-    float fyy = h.z;
+    vec3 hessian = texture(uTexture, vUv).xyz;
+    float dxx = hessian.x;
+    float dxy = hessian.y;
+    float dyy = hessian.z;
     
-    float trace = fxx + fyy;
-    float det = fxx * fyy - fxy * fxy;
+    // Аналитические собственные значения 2x2 симметричной матрицы
+    // lambda = 0.5 * (Dxx + Dyy ± sqrt((Dxx - Dyy)² + 4*Dxy²))
     
-    float disc = trace * trace - 4.0 * det;
-    if(disc < 0.0) disc = 0.0;
+    float trace = dxx + dyy;
+    float det = dxx * dyy - dxy * dxy;
+    float discriminant = trace * trace - 4.0 * det;
     
-    float sqrtDisc = sqrt(disc);
-    float lambda1 = 0.5 * (trace + sqrtDisc);
-    float lambda2 = 0.5 * (trace - sqrtDisc);
+    // Защита от отрицательного дискриминанта (численная ошибка)
+    discriminant = max(discriminant, 0.0);
+    float sqrtDisc = sqrt(discriminant);
     
-    if(abs(lambda1) > abs(lambda2)) {
-        float tmp = lambda1;
+    float lambda1 = 0.5 * (trace - sqrtDisc);  // Меньшее по модулю
+    float lambda2 = 0.5 * (trace + sqrtDisc);  // Большее по модулю
+    
+    // Сортировка по абсолютному значению: |lambda1| <= |lambda2|
+    if (abs(lambda1) > abs(lambda2)) {
+        float temp = lambda1;
         lambda1 = lambda2;
-        lambda2 = tmp;
+        lambda2 = temp;
     }
     
     FragColor = vec4(lambda1, lambda2, 0.0, 1.0);
 }
 )";
 
-// Vesselness shader
+// ============================================================================
+// VESSELNESS SHADER (исправленный с поддержкой dark/bright vessels)
+// ============================================================================
+
 const char* vesselnessFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
-uniform sampler2D uTexture;
+
+uniform sampler2D uTexture;  // (lambda1, lambda2)
 uniform float uBeta;
 uniform float uC;
+uniform int uBlackWhite;  // 1 = темные вены (черные на белом), 0 = светлые вены (белые на черном)
 
 void main() {
     vec4 eigs = texture(uTexture, vUv);
@@ -227,17 +234,31 @@ void main() {
     
     float vesselness = 0.0;
     
-    if(lambda2 < 0.0) {
+    // Проверка знака lambda2
+    // Для темных вен: lambda2 > 0 (выпуклая кривизна)
+    // Для светлых вен: lambda2 < 0 (вогнутая кривизна)
+    bool is_vessel = (uBlackWhite == 1) ? (lambda2 > 0.0) : (lambda2 < 0.0);
+    
+    if (is_vessel) {
         float beta_sq = uBeta * uBeta;
         float c_sq = uC * uC;
         
-        float rb = lambda1 / (lambda2 + 1e-6);
+        // Защита от деления на ноль
+        float lambda2_safe = (abs(lambda2) < 1e-10) ? 
+            ((uBlackWhite == 1) ? 1e-10 : -1e-10) : lambda2;
+        
+        // Rb: отношение собственных значений в квадрате
+        float rb = lambda1 / lambda2_safe;
         rb = rb * rb;
         
-        float s2 = lambda1*lambda1 + lambda2*lambda2;
+        // S: норма Фробениуса гессиана
+        float s2 = lambda1 * lambda1 + lambda2_safe * lambda2_safe;
         
-        float term1 = exp(-rb / beta_sq);
-        float term2 = 1.0 - exp(-s2 / c_sq);
+        // Frangi formula (из оригинальной статьи)
+        // term1: подавляет blob-like структуры (близко к 1 для линий)
+        // term2: подавляет фоновый шум (близко к 1 для структур)
+        float term1 = exp(-rb / (2.0 * beta_sq));
+        float term2 = 1.0 - exp(-s2 / (2.0 * c_sq));
         
         vesselness = term1 * term2;
     }
@@ -249,8 +270,10 @@ void main() {
 // Segmentation shader - бинаризация по порогу
 const char* segmentationFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
+
 uniform sampler2D uTexture;
 uniform float uThreshold;
 
@@ -267,8 +290,10 @@ void main() {
 // Overlay shader - накладывает сегментированную маску на исходное изображение
 const char* overlayFragmentSrc = R"(
 #version 330 core
+
 in vec2 vUv;
 out vec4 FragColor;
+
 uniform sampler2D uOriginal;
 uniform sampler2D uSegmented;
 
@@ -276,76 +301,81 @@ void main() {
     vec4 original = texture(uOriginal, vUv);
     float mask = texture(uSegmented, vUv).x;
     
-    // Просто добавляем бинарную маску к исходному изображению
-    // mask уже либо 0.0 либо 1.0
-    vec3 overlay = original.rgb + vec3(mask);
+    // Добавляем бинарную маску к исходному изображению
+    vec3 overlay = original.rgb + vec3(mask * 0.5);  // Полупрозрачная маска
     
     FragColor = vec4(overlay, 1.0);
 }
 )";
 
-// Visualize shader
-const char* visualizeFragmentSrc = R"(
-#version 330 core
-in vec2 vUv;
-out vec4 FragColor;
-uniform sampler2D uTexture;
-uniform int uStage;
+// ============================================================================
+// C++ UTILITY FUNCTIONS
+// ============================================================================
 
-void main() {
-    vec4 texel = texture(uTexture, vUv);
-    vec3 color;
+// Генерация 1D ядер производных Гауссиана
+std::vector<float> generateGaussianKernel(float sigma, int derivative_order) {
+    int kernel_size = 2 * std::round(3.0f * sigma) + 1;
+    int center = kernel_size / 2;
+    std::vector<float> kernel(kernel_size);
     
-    if(uStage == 3) {
-        // Gradients: показываем magnitude градиентов с ОЧЕНЬ сильным усилением
-        float gx = texel.x;
-        float gy = texel.y;
-        float magnitude = sqrt(gx*gx + gy*gy);
-        magnitude = magnitude * 50.0; // Усиление x50!
-        magnitude = clamp(magnitude, 0.0, 1.0);
-        // Визуализируем gx как красный, gy как зеленый для отладки
-        color = vec3(abs(gx)*50.0, abs(gy)*50.0, magnitude);
-        color = clamp(color, 0.0, 1.0);
-    } else if(uStage == 4 || uStage == 5) {
-        // Hessian/Eigenvalues: могут быть отрицательными, показываем abs
-        float v = abs(texel.x);
-        v = v * 10.0; // Усиление
-        v = clamp(v, 0.0, 1.0);
-        color = vec3(v);
-    } else if(uStage == 6) {
-        // Vesselness: нужно сильное усиление т.к. значения очень маленькие
-        float v = texel.x;
-        v = v * 100.0; // Усиление x100!
-        v = clamp(v, 0.0, 1.0);
-        v = v * v; // Мягкий контраст для лучшей видимости
-        color = vec3(v);
-    } else if(uStage == 7) {
-        // Segmentation: бинарная маска, показываем как есть
-        float v = texel.x;
-        color = vec3(v);
-    } else if(uStage == 8) {
-        // Overlay: уже цветное, просто показываем как есть
-        color = texel.rgb;
-    } else {
-        // Grayscale, Invert, Blur: обычная визуализация
-        float v = texel.x;
-        v = clamp(v, 0.0, 1.0);
-        color = vec3(v);
+    float sigma2 = sigma * sigma;
+    float sigma4 = sigma2 * sigma2;
+    float sigma6 = sigma4 * sigma2;
+    
+    float norm_factor = 1.0f / std::sqrt(2.0f * M_PI * sigma2);
+    
+    for (int i = 0; i < kernel_size; i++) {
+        float x = static_cast<float>(i - center);
+        float gauss = std::exp(-(x * x) / (2.0f * sigma2));
+        
+        if (derivative_order == 0) {
+            // G(x) - обычное Гауссово размытие
+            kernel[i] = gauss * norm_factor;
+        }
+        else if (derivative_order == 1) {
+            // dG/dx = -x/σ² * G(x)
+            kernel[i] = (-x / sigma2) * gauss * norm_factor;
+        }
+        else if (derivative_order == 2) {
+            // d²G/dx² = (x²/σ⁴ - 1/σ²) * G(x)
+            kernel[i] = ((x * x / sigma4) - (1.0f / sigma2)) * gauss * norm_factor;
+        }
     }
     
-    FragColor = vec4(color, 1.0);
+    // Нормализация (для 0-й производной сумма должна быть 1)
+    if (derivative_order == 0) {
+        float sum = 0.0f;
+        for (float val : kernel) {
+            sum += val;
+        }
+        if (sum > 1e-10f) {
+            for (float& val : kernel) {
+                val /= sum;
+            }
+        }
+    }
+    
+    return kernel;
 }
-)";
 
-GLRenderer::GLRenderer() 
+// ============================================================================
+// GLRenderer IMPLEMENTATION
+// ============================================================================
+
+GLRenderer::GLRenderer()
     : initialized(false), currentWidth(0), currentHeight(0),
-      globalContrastShader(0), grayscaleShader(0), invertShader(0), blurXShader(0), blurYShader(0),
-      gradientsShader(0), hessianShader(0), eigenvaluesShader(0), 
-      vesselnessShader(0), segmentationShader(0), overlayShader(0), visualizeShader(0),
-      fboPreprocessed(0), fboGray(0), fboInvert(0), fboBlurX(0), fboBlurY(0),
-      fboGradients(0), fboHessian(0), fboEigenvalues(0), fboVesselness(0), fboSegmentation(0), fboOverlay(0),
-      texPreprocessed(0), texGray(0), texInvert(0), texBlurX(0), texBlurY(0),
-      texGradients(0), texHessian(0), texEigenvalues(0), texVesselness(0), texSegmentation(0), texOverlay(0),
+      globalContrastShader(0), grayscaleShader(0), invertShader(0),
+      convolve1DShader(0), scaleNormShader(0),
+      eigenvaluesShader(0), vesselnessShader(0),
+      segmentationShader(0), overlayShader(0),
+      fboPreprocessed(0), fboGray(0), fboInvert(0),
+      fboDxxTemp(0), fboDxx(0), fboDyyTemp(0), fboDyy(0), fboDxyTemp(0), fboDxy(0),
+      fboHessian(0), fboEigenvalues(0), fboVesselness(0),
+      fboSegmentation(0), fboOverlay(0),
+      texPreprocessed(0), texGray(0), texInvert(0),
+      texDxxTemp(0), texDxx(0), texDyyTemp(0), texDyy(0), texDxyTemp(0), texDxy(0),
+      texHessian(0), texEigenvalues(0), texVesselness(0),
+      texSegmentation(0), texOverlay(0),
       inputTexture(0), vao(0), vbo(0) {
 }
 
@@ -354,11 +384,9 @@ GLRenderer::~GLRenderer() {
 }
 
 bool GLRenderer::isGPUAvailable() {
-    // Проверяем версию OpenGL
     const char* version = (const char*)glGetString(GL_VERSION);
     if (!version) return false;
     
-    // Проверяем что версия >= 3.3
     int major = 0, minor = 0;
     sscanf(version, "%d.%d", &major, &minor);
     return (major > 3) || (major == 3 && minor >= 3);
@@ -448,29 +476,27 @@ bool GLRenderer::initialize() {
     globalContrastShader = compileShader(vertexShaderSrc, globalContrastFragmentSrc);
     grayscaleShader = compileShader(vertexShaderSrc, grayscaleFragmentSrc);
     invertShader = compileShader(vertexShaderSrc, invertFragmentSrc);
-    blurXShader = compileShader(vertexShaderSrc, blurXFragmentSrc);
-    blurYShader = compileShader(vertexShaderSrc, blurYFragmentSrc);
-    gradientsShader = compileShader(vertexShaderSrc, gradientsFragmentSrc);
-    hessianShader = compileShader(vertexShaderSrc, hessianFragmentSrc);
+    convolve1DShader = compileShader(vertexShaderSrc, convolve1DFragmentSrc);
+    scaleNormShader = compileShader(vertexShaderSrc, scaleNormalizationFragmentSrc);
     eigenvaluesShader = compileShader(vertexShaderSrc, eigenvaluesFragmentSrc);
     vesselnessShader = compileShader(vertexShaderSrc, vesselnessFragmentSrc);
     segmentationShader = compileShader(vertexShaderSrc, segmentationFragmentSrc);
     overlayShader = compileShader(vertexShaderSrc, overlayFragmentSrc);
-    visualizeShader = compileShader(vertexShaderSrc, visualizeFragmentSrc);
     
-    if (!globalContrastShader || !grayscaleShader || !invertShader || !blurXShader || !blurYShader ||
-        !gradientsShader || !hessianShader || !eigenvaluesShader || 
-        !vesselnessShader || !segmentationShader || !overlayShader || !visualizeShader) {
+    if (!globalContrastShader || !grayscaleShader || !invertShader ||
+        !convolve1DShader || !scaleNormShader ||
+        !eigenvaluesShader || !vesselnessShader ||
+        !segmentationShader || !overlayShader) {
         std::cerr << "Failed to compile shaders!" << std::endl;
         return false;
     }
     
     // Создаем VAO и VBO для quad
     float vertices[] = {
-        -1.0f, -1.0f, 0.0f, 0.0f,  // bottom-left
-         1.0f, -1.0f, 1.0f, 0.0f,  // bottom-right
-        -1.0f,  1.0f, 0.0f, 1.0f,  // top-left
-         1.0f,  1.0f, 1.0f, 1.0f   // top-right
+        -1.0f, -1.0f,  0.0f, 0.0f,  // bottom-left
+         1.0f, -1.0f,  1.0f, 0.0f,  // bottom-right
+        -1.0f,  1.0f,  0.0f, 1.0f,  // top-left
+         1.0f,  1.0f,  1.0f, 1.0f   // top-right
     };
     
     glGenVertexArrays(1, &vao);
@@ -492,28 +518,43 @@ bool GLRenderer::initialize() {
     
     initialized = true;
     std::cout << "GL Renderer initialized successfully!" << std::endl;
+    
     return true;
 }
 
 void GLRenderer::recreateFramebuffers(int width, int height) {
     // Удаляем старые framebuffers и текстуры
     if (fboGray) {
-        GLuint fbos[] = {fboPreprocessed, fboGray, fboInvert, fboBlurX, fboBlurY, 
-                         fboGradients, fboHessian, fboEigenvalues, fboVesselness, fboSegmentation, fboOverlay};
-        glDeleteFramebuffers(11, fbos);
+        GLuint fbos[] = {
+            fboPreprocessed, fboGray, fboInvert,
+            fboDxxTemp, fboDxx, fboDyyTemp, fboDyy, fboDxyTemp, fboDxy,
+            fboHessian, fboEigenvalues, fboVesselness,
+            fboSegmentation, fboOverlay
+        };
+        glDeleteFramebuffers(14, fbos);
         
-        GLuint textures[] = {texPreprocessed, texGray, texInvert, texBlurX, texBlurY,
-                             texGradients, texHessian, texEigenvalues, texVesselness, texSegmentation, texOverlay};
-        glDeleteTextures(11, textures);
+        GLuint textures[] = {
+            texPreprocessed, texGray, texInvert,
+            texDxxTemp, texDxx, texDyyTemp, texDyy, texDxyTemp, texDxy,
+            texHessian, texEigenvalues, texVesselness,
+            texSegmentation, texOverlay
+        };
+        glDeleteTextures(14, textures);
     }
     
     // Создаем новые
     createFramebuffer(&fboPreprocessed, &texPreprocessed, width, height);
     createFramebuffer(&fboGray, &texGray, width, height);
     createFramebuffer(&fboInvert, &texInvert, width, height);
-    createFramebuffer(&fboBlurX, &texBlurX, width, height);
-    createFramebuffer(&fboBlurY, &texBlurY, width, height);
-    createFramebuffer(&fboGradients, &texGradients, width, height);
+    
+    // Temp buffers для вычисления производных
+    createFramebuffer(&fboDxxTemp, &texDxxTemp, width, height);
+    createFramebuffer(&fboDxx, &texDxx, width, height);
+    createFramebuffer(&fboDyyTemp, &texDyyTemp, width, height);
+    createFramebuffer(&fboDyy, &texDyy, width, height);
+    createFramebuffer(&fboDxyTemp, &texDxyTemp, width, height);
+    createFramebuffer(&fboDxy, &texDxy, width, height);
+    
     createFramebuffer(&fboHessian, &texHessian, width, height);
     createFramebuffer(&fboEigenvalues, &texEigenvalues, width, height);
     createFramebuffer(&fboVesselness, &texVesselness, width, height);
@@ -553,7 +594,6 @@ void GLRenderer::uploadTexture(const cv::Mat& image) {
 
 cv::Mat GLRenderer::downloadTexture(GLuint texture, int width, int height) {
     cv::Mat result(height, width, CV_32FC4);
-    
     glBindTexture(GL_TEXTURE_2D, texture);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, result.data);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -585,6 +625,18 @@ void GLRenderer::renderPass(GLuint program, GLuint targetFBO, GLuint inputTex) {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+void GLRenderer::setConvolveKernel(const std::vector<float>& kernel, int direction) {
+    glUseProgram(convolve1DShader);
+    
+    // Передаем ядро свертки
+    glUniform1fv(glGetUniformLocation(convolve1DShader, "uKernel"), 
+                 std::min((int)kernel.size(), 64), kernel.data());
+    glUniform1i(glGetUniformLocation(convolve1DShader, "uKernelSize"), kernel.size());
+    glUniform1i(glGetUniformLocation(convolve1DShader, "uDirection"), direction);
+    
+    glUseProgram(0);
+}
+
 cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, float c,
                                   int displayStage, bool invertEnabled,
                                   bool globalContrastEnabled, float brightness, float contrast,
@@ -603,19 +655,17 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     // Загружаем входное изображение
     uploadTexture(input);
     
-    // Pass -1: Global Contrast (опционально, препроцессинг через GPU)
+    // Pass -1: Global Contrast (опционально)
     GLuint textureAfterPreprocessing = inputTexture;
-    
     if (globalContrastEnabled) {
         glUseProgram(globalContrastShader);
         glUniform1f(glGetUniformLocation(globalContrastShader, "uBrightness"), brightness);
         glUniform1f(glGetUniformLocation(globalContrastShader, "uContrast"), contrast);
         glUseProgram(0);
+        
         renderPass(globalContrastShader, fboPreprocessed, inputTexture);
         textureAfterPreprocessing = texPreprocessed;
     }
-    
-    // Примечание: CLAHE применяется на CPU в frangi_processor перед вызовом этой функции
     
     // Pass 0: Grayscale
     renderPass(grayscaleShader, fboGray, textureAfterPreprocessing);
@@ -629,43 +679,99 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
         textureAfterInvert = texGray;
     }
     
-    // Pass 2: Blur X
-    glUseProgram(blurXShader);
-    glUniform1f(glGetUniformLocation(blurXShader, "uSigma"), sigma);
+    // ========================================================================
+    // НОВЫЙ ПАЙПЛАЙН: Вычисление Гессиана через производные Гауссиана
+    // ========================================================================
+    
+    // Генерируем ядра производных Гауссиана
+    auto kernel_g = generateGaussianKernel(sigma, 0);    // G (0-я производная)
+    auto kernel_dg = generateGaussianKernel(sigma, 1);   // dG/dx (1-я производная)
+    auto kernel_d2g = generateGaussianKernel(sigma, 2);  // d²G/dx² (2-я производная)
+    
+    std::cout << "Sigma: " << sigma 
+              << ", Kernel sizes: G=" << kernel_g.size() 
+              << ", dG=" << kernel_dg.size() 
+              << ", d²G=" << kernel_d2g.size() << std::endl;
+    
+    // --- Вычисление Dxx = (d²G/dx²) ⊗ G ---
+    // Проход 1: Horizontal d²G/dx²
+    setConvolveKernel(kernel_d2g, 0);  // direction=0 (horizontal)
+    renderPass(convolve1DShader, fboDxxTemp, textureAfterInvert);
+    
+    // Проход 2: Vertical G
+    setConvolveKernel(kernel_g, 1);  // direction=1 (vertical)
+    renderPass(convolve1DShader, fboDxx, texDxxTemp);
+    
+    // --- Вычисление Dyy = G ⊗ (d²G/dy²) ---
+    // Проход 1: Horizontal G
+    setConvolveKernel(kernel_g, 0);
+    renderPass(convolve1DShader, fboDyyTemp, textureAfterInvert);
+    
+    // Проход 2: Vertical d²G/dy²
+    setConvolveKernel(kernel_d2g, 1);
+    renderPass(convolve1DShader, fboDyy, texDyyTemp);
+    
+    // --- Вычисление Dxy = (dG/dx) ⊗ (dG/dy) ---
+    // Проход 1: Horizontal dG/dx
+    setConvolveKernel(kernel_dg, 0);
+    renderPass(convolve1DShader, fboDxyTemp, textureAfterInvert);
+    
+    // Проход 2: Vertical dG/dy
+    setConvolveKernel(kernel_dg, 1);
+    renderPass(convolve1DShader, fboDxy, texDxyTemp);
+    
+    // --- Scale Normalization: умножаем на σ² ---
+    glBindFramebuffer(GL_FRAMEBUFFER, fboHessian);
+    glViewport(0, 0, currentWidth, currentHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    glUseProgram(scaleNormShader);
+    glUniform1i(glGetUniformLocation(scaleNormShader, "uDxx"), 0);
+    glUniform1i(glGetUniformLocation(scaleNormShader, "uDyy"), 1);
+    glUniform1i(glGetUniformLocation(scaleNormShader, "uDxy"), 2);
+    glUniform1f(glGetUniformLocation(scaleNormShader, "uSigma"), sigma);
+    
+    glBindVertexArray(vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texDxx);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, texDyy);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, texDxy);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBindVertexArray(0);
     glUseProgram(0);
-    renderPass(blurXShader, fboBlurX, textureAfterInvert);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     
-    // Pass 3: Blur Y
-    glUseProgram(blurYShader);
-    glUniform1f(glGetUniformLocation(blurYShader, "uSigma"), sigma);
-    glUseProgram(0);
-    renderPass(blurYShader, fboBlurY, texBlurX);
-    
-    // Pass 4: Gradients
-    renderPass(gradientsShader, fboGradients, texBlurY);
-    
-    // Pass 5: Hessian
-    renderPass(hessianShader, fboHessian, texGradients);
-    
-    // Pass 6: Eigenvalues
+    // ========================================================================
+    // Pass: Eigenvalues
+    // ========================================================================
     renderPass(eigenvaluesShader, fboEigenvalues, texHessian);
     
-    // Pass 7: Vesselness
+    // ========================================================================
+    // Pass: Vesselness
+    // ========================================================================
     glUseProgram(vesselnessShader);
     glUniform1f(glGetUniformLocation(vesselnessShader, "uBeta"), beta);
     glUniform1f(glGetUniformLocation(vesselnessShader, "uC"), c);
+    glUniform1i(glGetUniformLocation(vesselnessShader, "uBlackWhite"), invertEnabled ? 0 : 1);
     glUseProgram(0);
+    
     renderPass(vesselnessShader, fboVesselness, texEigenvalues);
     
-    // Pass 8: Segmentation - бинаризация по порогу
+    // ========================================================================
+    // Pass: Segmentation
+    // ========================================================================
     glBindFramebuffer(GL_FRAMEBUFFER, fboSegmentation);
     glViewport(0, 0, currentWidth, currentHeight);
     glClear(GL_COLOR_BUFFER_BIT);
     
     glUseProgram(segmentationShader);
     glUniform1f(glGetUniformLocation(segmentationShader, "uThreshold"), segmentationThreshold);
-    glBindVertexArray(vao);
     
+    glBindVertexArray(vao);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, texVesselness);
     glUniform1i(glGetUniformLocation(segmentationShader, "uTexture"), 0);
@@ -676,7 +782,9 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     
-    // Pass 9: Overlay - накладываем сегментированную маску на оригинал
+    // ========================================================================
+    // Pass: Overlay
+    // ========================================================================
     glBindFramebuffer(GL_FRAMEBUFFER, fboOverlay);
     glViewport(0, 0, currentWidth, currentHeight);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -684,12 +792,10 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     glUseProgram(overlayShader);
     glBindVertexArray(vao);
     
-    // Привязываем оригинальное изображение к текстуре 0
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, inputTexture);
     glUniform1i(glGetUniformLocation(overlayShader, "uOriginal"), 0);
     
-    // Привязываем сегментированную маску к текстуре 1
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, texSegmentation);
     glUniform1i(glGetUniformLocation(overlayShader, "uSegmented"), 1);
@@ -700,24 +806,22 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     
+    // ========================================================================
     // Выбираем какую текстуру вернуть
+    // ========================================================================
     GLuint textureToShow;
     switch(displayStage) {
         case 0: textureToShow = texGray; break;
         case 1: textureToShow = texInvert; break;
-        case 2: textureToShow = texBlurY; break;
-        case 3: textureToShow = texGradients; break;
-        case 4: textureToShow = texHessian; break;
-        case 5: textureToShow = texEigenvalues; break;
-        case 6: textureToShow = texVesselness; break;
-        case 7: textureToShow = texSegmentation; break;
+        case 2: textureToShow = texDxx; break;  // Dxx для отладки
+        case 3: textureToShow = texHessian; break;
+        case 4: textureToShow = texEigenvalues; break;
+        case 5: textureToShow = texVesselness; break;
+        case 6: textureToShow = texSegmentation; break;
+        case 7:
         case 8:
         default: textureToShow = texOverlay; break;
     }
-    
-    // Применяем визуализацию (для усиления контраста)
-    glBindFramebuffer(GL_FRAMEBUFFER, fboVesselness + 100); // Временный FBO для финального результата
-    // На самом деле просто скачиваем текстуру и применяем визуализацию на CPU для простоты
     
     return downloadTexture(textureToShow, currentWidth, currentHeight);
 }
@@ -729,25 +833,30 @@ void GLRenderer::cleanup() {
     if (globalContrastShader) glDeleteProgram(globalContrastShader);
     if (grayscaleShader) glDeleteProgram(grayscaleShader);
     if (invertShader) glDeleteProgram(invertShader);
-    if (blurXShader) glDeleteProgram(blurXShader);
-    if (blurYShader) glDeleteProgram(blurYShader);
-    if (gradientsShader) glDeleteProgram(gradientsShader);
-    if (hessianShader) glDeleteProgram(hessianShader);
+    if (convolve1DShader) glDeleteProgram(convolve1DShader);
+    if (scaleNormShader) glDeleteProgram(scaleNormShader);
     if (eigenvaluesShader) glDeleteProgram(eigenvaluesShader);
     if (vesselnessShader) glDeleteProgram(vesselnessShader);
     if (segmentationShader) glDeleteProgram(segmentationShader);
     if (overlayShader) glDeleteProgram(overlayShader);
-    if (visualizeShader) glDeleteProgram(visualizeShader);
     
     // Удаляем framebuffers и текстуры
     if (fboGray) {
-        GLuint fbos[] = {fboPreprocessed, fboGray, fboInvert, fboBlurX, fboBlurY,
-                         fboGradients, fboHessian, fboEigenvalues, fboVesselness, fboSegmentation, fboOverlay};
-        glDeleteFramebuffers(11, fbos);
+        GLuint fbos[] = {
+            fboPreprocessed, fboGray, fboInvert,
+            fboDxxTemp, fboDxx, fboDyyTemp, fboDyy, fboDxyTemp, fboDxy,
+            fboHessian, fboEigenvalues, fboVesselness,
+            fboSegmentation, fboOverlay
+        };
+        glDeleteFramebuffers(14, fbos);
         
-        GLuint textures[] = {texPreprocessed, texGray, texInvert, texBlurX, texBlurY,
-                             texGradients, texHessian, texEigenvalues, texVesselness, texSegmentation, texOverlay};
-        glDeleteTextures(11, textures);
+        GLuint textures[] = {
+            texPreprocessed, texGray, texInvert,
+            texDxxTemp, texDxx, texDyyTemp, texDyy, texDxyTemp, texDxy,
+            texHessian, texEigenvalues, texVesselness,
+            texSegmentation, texOverlay
+        };
+        glDeleteTextures(14, textures);
     }
     
     if (inputTexture) glDeleteTextures(1, &inputTexture);
@@ -757,4 +866,3 @@ void GLRenderer::cleanup() {
     initialized = false;
     std::cout << "GL Renderer cleaned up" << std::endl;
 }
-

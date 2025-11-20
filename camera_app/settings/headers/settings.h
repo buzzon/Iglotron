@@ -9,7 +9,7 @@ struct AppSettings {
     float sigma = 1.5f;
     float beta = 0.5f;
     float c = 15.0f;
-    int displayStage = 8;
+    int displayStage = 7;
     bool invertEnabled = true;
     float segmentationThreshold = 0.01f;
     

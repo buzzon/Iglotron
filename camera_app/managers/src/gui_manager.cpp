@@ -327,20 +327,19 @@ void GUIManager::renderFrangiSection(AppState& state) {
         const char* stages[] = {
             "0: Grayscale",
             "1: Invert",
-            "2: Blur",
-            "3: Gradients",
-            "4: Hessian",
-            "5: Eigenvalues",
-            "6: Vesselness",
-            "7: Segmentation",
-            "8: Overlay"
+            "2: Dxx (debug)",
+            "3: Hessian",
+            "4: Eigenvalues",
+            "5: Vesselness",
+            "6: Segmentation",
+            "7: Overlay"
         };
-        ImGui::Combo("Display Stage", &state.displayStage, stages, 9);
+        ImGui::Combo("Display Stage", &state.displayStage, stages, 8);
         ImGui::Checkbox("Enable Invert (dark structures)", &state.invertEnabled);
         
         ImGui::Spacing();
         ImGui::Text("Segmentation");
-        ImGui::SliderFloat("Threshold", &state.segmentationThreshold, 0.001f, 0.1f, "%.4f");
+        ImGui::SliderFloat("Threshold", &state.segmentationThreshold, 0.0f, 1.0f, "%.4f");
         
         ImGui::Unindent();
     }
