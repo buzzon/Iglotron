@@ -26,18 +26,23 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(camera_app
     main.cpp
-    frangi_processor.cpp
-    frangi_processor.h
-    gl_renderer.cpp
-    gl_renderer.h
-    frangi.cpp
-    frangi.h
-    gui_manager.cpp
-    gui_manager.h
-    mask_filters.cpp
-    mask_filters.h
-    settings.cpp
-    settings.h
+    app_state.h
+    settings/src/settings.cpp
+    settings/headers/settings.h
+    processors/src/frangi_processor.cpp
+    processors/headers/frangi_processor.h
+    processors/src/gl_renderer.cpp
+    processors/headers/gl_renderer.h
+    processors/src/frangi.cpp
+    processors/headers/frangi.h
+    processors/src/mask_filters.cpp
+    processors/headers/mask_filters.h
+    managers/src/window_manager.cpp
+    managers/headers/window_manager.h
+    managers/src/camera_manager.cpp
+    managers/headers/camera_manager.h
+    managers/src/gui_manager.cpp
+    managers/headers/gui_manager.h
 )
 
 target_link_libraries(camera_app PRIVATE
@@ -51,13 +56,19 @@ target_link_libraries(camera_app PRIVATE
 
 target_include_directories(camera_app PRIVATE
     ${OpenCV_INCLUDE_DIRS}
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/managers/headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/processors/headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/settings/headers
 )
 
 # Копирование settings.json в выходную директорию
 add_custom_command(TARGET camera_app POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:camera_app>/settings/configs"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/settings.json"
-        $<TARGET_FILE_DIR:camera_app>
+        "${CMAKE_CURRENT_SOURCE_DIR}/settings/configs/settings.json"
+        "$<TARGET_FILE_DIR:camera_app>/settings/configs/settings.json"
     COMMENT "Copying settings.json to output directory"
 )
 

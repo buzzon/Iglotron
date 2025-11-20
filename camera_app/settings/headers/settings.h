@@ -32,7 +32,7 @@ struct AppSettings {
     float approvalThreshold = 0.5f;
     
     // Пути к файлам
-    std::string settingsFile = "settings.json";
+    std::string settingsFile = "settings/configs/settings.json";
 };
 
 // Функции для работы с настройками

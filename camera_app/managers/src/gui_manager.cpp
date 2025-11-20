@@ -1,6 +1,8 @@
 #include "gui_manager.h"
-#include "frangi_processor.h"
-#include "settings.h"
+#include "app_state.h"
+#include "processors/headers/frangi_processor.h"
+#include "settings/headers/settings.h"
+#include "camera_manager.h"
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -10,75 +12,7 @@
 #include <vector>
 #include <string>
 
-// Информация о камере
-struct CameraInfo {
-    int index;
-    std::string name;
-    int width;
-    int height;
-    double fps;
-    bool available;
-    
-    CameraInfo() : index(-1), width(0), height(0), fps(0), available(false) {}
-};
-
-// Определение структуры AppState (должно совпадать с main.cpp)
-struct AppState {
-    // Параметры Frangi фильтра (загружаются из settings)
-    float sigma;
-    float beta;
-    float c;
-    int displayStage;
-    bool invertEnabled;
-    float segmentationThreshold;
-    
-    // Параметры препроцессинга (загружаются из settings)
-    bool globalContrastEnabled;
-    float globalBrightness;
-    float globalContrast;
-    
-    bool claheEnabled;
-    int claheMaxIterations;
-    float claheTargetContrast;
-    
-    // Камера
-    cv::VideoCapture camera;
-    cv::Mat rawFrame;
-    cv::Mat preprocessedFrame;
-    cv::Mat processedFrame;
-    
-    // Список доступных камер
-    std::vector<CameraInfo> availableCameras;
-    int selectedCameraIndex = 0;  // Индекс в availableCameras, не индекс камеры!
-    
-    // Frangi процессор
-    FrangiProcessor* processor = nullptr;
-    
-    // FPS
-    double lastTime = 0.0;
-    int frameCount = 0;
-    float fps = 0.0f;
-    
-    // Статус
-    bool cameraActive = false;
-    
-    // ImGui текстуры для отображения видео
-    GLuint rawFrameTexture = 0;
-    GLuint processedFrameTexture = 0;
-    
-    // Аппрувинг (injection window)
-    bool approvalEnabled;
-    int approvalMaskHeight;
-    int approvalMaskWidth;
-    float approvalThreshold;
-    float approvalRatio = 0.0f;
-    
-    // Настройки
-    AppSettings settings;
-};
-
 // Forward declarations функций из main.cpp
-extern void scanAvailableCameras(AppState& state);
 extern void saveStateToSettings(AppState& state);
 extern void loadSettingsToState(AppState& state);
 
@@ -206,7 +140,7 @@ void GUIManager::renderControlPanel(AppState& state) {
     
     // FPS и статус
     ImGui::Text("FPS: %.1f", state.fps);
-    ImGui::Text("Camera: %s", state.cameraActive ? "Active" : "Inactive");
+    ImGui::Text("Camera: %s", state.cameraManager.isOpen() ? "Active" : "Inactive");
     ImGui::Text("Method: %s", state.processor ? state.processor->getMethodName() : "N/A");
     
     if (!state.rawFrame.empty()) {
@@ -220,11 +154,11 @@ void GUIManager::renderControlPanel(AppState& state) {
     if (ImGui::CollapsingHeader("Settings Management")) {
         ImGui::Indent();
         
-        ImGui::Text("File: settings.json");
+        ImGui::Text("File: settings/configs/settings.json");
         
         if (ImGui::Button("Save Settings", ImVec2(-1, 0))) {
             saveStateToSettings(state);
-            if (SettingsManager::saveSettings("settings.json", state.settings)) {
+            if (SettingsManager::saveSettings("settings/configs/settings.json", state.settings)) {
                 std::cout << "✓ Settings saved successfully!" << std::endl;
             } else {
                 std::cerr << "✗ Failed to save settings!" << std::endl;
@@ -232,7 +166,7 @@ void GUIManager::renderControlPanel(AppState& state) {
         }
         
         if (ImGui::Button("Load Settings", ImVec2(-1, 0))) {
-            if (SettingsManager::loadSettings("settings.json", state.settings)) {
+            if (SettingsManager::loadSettings("settings/configs/settings.json", state.settings)) {
                 loadSettingsToState(state);
                 std::cout << "✓ Settings loaded successfully!" << std::endl;
             } else {
@@ -241,8 +175,8 @@ void GUIManager::renderControlPanel(AppState& state) {
         }
         
         if (ImGui::Button("Reset to Defaults", ImVec2(-1, 0))) {
-            if (SettingsManager::createDefaultSettings("settings.json")) {
-                SettingsManager::loadSettings("settings.json", state.settings);
+            if (SettingsManager::createDefaultSettings("settings/configs/settings.json")) {
+                SettingsManager::loadSettings("settings/configs/settings.json", state.settings);
                 loadSettingsToState(state);
                 std::cout << "✓ Settings reset to defaults!" << std::endl;
             }
@@ -259,47 +193,32 @@ void GUIManager::renderControlPanel(AppState& state) {
     if (ImGui::CollapsingHeader("Camera Selection", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent();
         
-        if (!state.availableCameras.empty()) {
+        const auto& availableCameras = state.cameraManager.getAvailableCameras();
+        
+        if (!availableCameras.empty()) {
             // Создаем список имен камер для ComboBox
             std::vector<const char*> cameraNames;
-            for (const auto& cam : state.availableCameras) {
+            for (const auto& cam : availableCameras) {
                 cameraNames.push_back(cam.name.c_str());
             }
             
-            int previousSelection = state.selectedCameraIndex;
-            if (ImGui::Combo("Camera", &state.selectedCameraIndex, cameraNames.data(), 
+            int currentSelection = state.cameraManager.getSelectedCameraIndex();
+            if (ImGui::Combo("Camera", &currentSelection, cameraNames.data(), 
                             static_cast<int>(cameraNames.size()))) {
                 // Камера изменилась, переподключаемся
-                if (state.camera.isOpened()) {
-                    std::cout << "Switching camera from index " 
-                              << state.availableCameras[previousSelection].index 
-                              << " to " << state.availableCameras[state.selectedCameraIndex].index 
-                              << std::endl;
-                    state.camera.release();
-                    
-                    int newCameraIndex = state.availableCameras[state.selectedCameraIndex].index;
-                    state.camera.open(newCameraIndex);
-                    
-                    if (state.camera.isOpened()) {
-                        // Применяем настройки
-                        state.camera.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-                        state.camera.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
-                        state.camera.set(cv::CAP_PROP_FPS, 30);
-                        state.cameraActive = true;
-                        std::cout << "Camera switched successfully!" << std::endl;
-                    } else {
-                        std::cerr << "Failed to open camera " << newCameraIndex << std::endl;
-                        state.cameraActive = false;
-                    }
+                if (state.cameraManager.switchCamera(currentSelection)) {
+                    std::cout << "Camera switched successfully!" << std::endl;
+                } else {
+                    std::cerr << "Failed to switch camera" << std::endl;
                 }
             }
             
             // Информация о текущей камере
-            if (state.selectedCameraIndex < state.availableCameras.size()) {
-                const auto& selectedCam = state.availableCameras[state.selectedCameraIndex];
-                ImGui::Text("Index: %d", selectedCam.index);
+            CameraInfo currentCam = state.cameraManager.getCurrentCameraInfo();
+            if (currentCam.available) {
+                ImGui::Text("Index: %d", currentCam.index);
                 ImGui::Text("Native: %dx%d @ %.1f FPS", 
-                           selectedCam.width, selectedCam.height, selectedCam.fps);
+                           currentCam.width, currentCam.height, currentCam.fps);
             }
         } else {
             ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "No cameras detected!");
@@ -307,7 +226,7 @@ void GUIManager::renderControlPanel(AppState& state) {
         
         // Кнопка для повторного сканирования
         if (ImGui::Button("Rescan Cameras", ImVec2(-1, 0))) {
-            scanAvailableCameras(state);
+            state.cameraManager.scanAvailableCameras();
         }
         
         ImGui::Unindent();
@@ -485,3 +404,4 @@ void GUIManager::renderVideoFeeds(AppState& state) {
     
     ImGui::EndChild();
 }
+
