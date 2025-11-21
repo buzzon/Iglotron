@@ -22,6 +22,9 @@ struct AppSettings {
     int claheMaxIterations = 2;
     float claheTargetContrast = 0.3f;
     
+    // Downscaling (уменьшение разрешения)
+    int downscaleDivisor = 1;  // 1 = без сжатия, 2 = сжатие в 2 раза, 4 = сжатие в 4 раза
+    
     // Камера
     int selectedCameraIndex = 0;
     

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <cmath>
 
 // Forward declarations функций из main.cpp
 extern void saveStateToSettings(AppState& state);
@@ -257,10 +258,60 @@ void GUIManager::renderPreprocessingSection(AppState& state) {
         ImGui::Checkbox("Global Contrast", &state.globalContrastEnabled);
         if (state.globalContrastEnabled) {
             ImGui::Indent();
-            ImGui::SliderFloat("Brightness", &state.globalBrightness, 0.0f, 100.0f, "%.1f");
-            ImGui::SliderFloat("Contrast", &state.globalContrast, 0.0f, 10.0f, "%.2f");
+            ImGui::SliderFloat("Brightness", &state.globalBrightness, 0.0f, 200.0f, "%.1f");
+            ImGui::SliderFloat("Contrast", &state.globalContrast, 0.0f, 20.0f, "%.2f");
             ImGui::Unindent();
         }
+        
+        ImGui::Spacing();
+        
+        // Downscaling
+        ImGui::Spacing();
+        ImGui::Text("Resolution Downscaling");
+        // Слайдер для выбора степени сжатия: 1 = без сжатия, 2 = в 2 раза, 4 = в 4 раза
+        const char* scaleLabels[] = {"1x (100%)", "2x (50%)", "4x (25%)"};
+        int scaleValues[] = {1, 2, 4};
+        int currentIndex = 0;
+        
+        // Находим текущий индекс
+        for (int i = 0; i < 3; i++) {
+            if (scaleValues[i] == state.downscaleDivisor) {
+                currentIndex = i;
+                break;
+            }
+        }
+        
+        ImGui::SliderInt("Downscale", &currentIndex, 0, 2, scaleLabels[currentIndex]);
+        state.downscaleDivisor = scaleValues[currentIndex];
+        
+        // Отображаем текущее значение
+        float factor = 1.0f / static_cast<float>(state.downscaleDivisor);
+        ImGui::Text("Scale: 1/%d = %.2f (%.0f%%)", state.downscaleDivisor, factor, factor * 100.0f);
+        
+        // Отображаем текущие размеры после downsampling (берем из GLRenderer)
+        if (!state.rawFrame.empty()) {
+            int originalWidth = state.rawFrame.cols;
+            int originalHeight = state.rawFrame.rows;
+            
+            // Получаем реальные размеры из GLRenderer (если используется GPU)
+            int downscaledWidth = 0;
+            int downscaledHeight = 0;
+            if (state.processor && state.processor->isUsingGPU()) {
+                downscaledWidth = state.processor->getDownscaledWidth();
+                downscaledHeight = state.processor->getDownscaledHeight();
+            }
+            
+            ImGui::Text("Original: %d x %d", originalWidth, originalHeight);
+            if (downscaledWidth > 0 && downscaledHeight > 0) {
+                ImGui::Text("Downscaled: %d x %d", downscaledWidth, downscaledHeight);
+            } else {
+                ImGui::TextDisabled("Downscaled: (not available)");
+            }
+        } else {
+            ImGui::TextDisabled("(No frame available)");
+        }
+        
+        ImGui::TextWrapped("Reduces processing resolution for better performance. Applied after Grayscale.");
         
         ImGui::Spacing();
         
@@ -318,9 +369,9 @@ void GUIManager::renderFrangiSection(AppState& state) {
     if (ImGui::CollapsingHeader("Frangi Filter", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent();
         
-        ImGui::SliderFloat("Sigma (Scale)", &state.sigma, 0.5f, 10.0f, "%.2f");
-        ImGui::SliderFloat("Beta (Plate Sensitivity)", &state.beta, 0.1f, 5.0f, "%.2f");
-        ImGui::SliderFloat("C (Contrast)", &state.c, 0.1f, 50.0f, "%.1f");
+        ImGui::SliderFloat("Sigma (Scale)", &state.sigma, 0.1f, 10.0f, "%.2f");
+        ImGui::SliderFloat("Beta (Plate Sensitivity)", &state.beta, 0.1f, 1.0f, "%.2f");
+        ImGui::SliderFloat("C (Contrast)", &state.c, 0.1f, 5.0f, "%.1f");
         
         ImGui::Spacing();
         

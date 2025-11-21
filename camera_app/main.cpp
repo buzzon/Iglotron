@@ -1,4 +1,5 @@
 #include <opencv2/opencv.hpp>
+#include <cmath>
 
 #include "app_state.h"
 #include "processors/headers/frangi_processor.h"
@@ -30,6 +31,8 @@ void loadSettingsToState(AppState& state) {
     state.claheMaxIterations = state.settings.claheMaxIterations;
     state.claheTargetContrast = state.settings.claheTargetContrast;
     
+    state.downscaleDivisor = state.settings.downscaleDivisor;
+    
     state.cameraManager.setSelectedCameraIndex(state.settings.selectedCameraIndex);
     
     state.approvalEnabled = state.settings.approvalEnabled;
@@ -54,6 +57,8 @@ void saveStateToSettings(AppState& state) {
     state.settings.claheEnabled = state.claheEnabled;
     state.settings.claheMaxIterations = state.claheMaxIterations;
     state.settings.claheTargetContrast = state.claheTargetContrast;
+    
+    state.settings.downscaleDivisor = state.downscaleDivisor;
     
     state.settings.selectedCameraIndex = state.cameraManager.getSelectedCameraIndex();
     
@@ -199,7 +204,8 @@ void processFrame(AppState& state, MaskFilters& filters) {
             state.claheEnabled,
             state.claheMaxIterations,
             state.claheTargetContrast,
-            state.segmentationThreshold
+            state.segmentationThreshold,
+            1.0f / static_cast<float>(state.downscaleDivisor)  // Вычисляем factor из divisor
         );
     }
     
@@ -213,7 +219,7 @@ void processFrame(AppState& state, MaskFilters& filters) {
                 state.sigma, 
                 state.beta, 
                 state.c,
-                7,  // Stage 7 = Segmentation
+                6,  // Stage 6 = Segmentation (исправлено: было 7, должно быть 6)
                 state.invertEnabled,
                 state.globalContrastEnabled,
                 state.globalBrightness,
@@ -221,22 +227,36 @@ void processFrame(AppState& state, MaskFilters& filters) {
                 state.claheEnabled,
                 state.claheMaxIterations,
                 state.claheTargetContrast,
-                state.segmentationThreshold
+                state.segmentationThreshold,
+                1.0f / static_cast<float>(state.downscaleDivisor)  // Вычисляем factor из divisor
             );
         }
         
-        // Вычисляем координаты маски
+        if (!segmentedMask.empty()) {
+            // Масштабируем координаты и размеры маски для downscaled разрешения
+            float downscaleFactor = 1.0f / static_cast<float>(state.downscaleDivisor);
+            int downscaledMaskHeight = static_cast<int>(std::round(state.approvalMaskHeight * downscaleFactor));
+            int downscaledMaskWidth = static_cast<int>(std::round(state.approvalMaskWidth * downscaleFactor));
+            
+            // Вычисляем координаты маски для downscaled разрешения
+            int maskY, maskX;
+            computeApprovalMaskCoords(segmentedMask.rows, segmentedMask.cols,
+                                     downscaledMaskHeight, downscaledMaskWidth,
+                                     maskY, maskX);
+            
+            // Вычисляем соотношение сосудов в downscaled маске
+            state.approvalRatio = computeApprovalRatio(segmentedMask, maskY, maskX,
+                                                       downscaledMaskHeight, 
+                                                       downscaledMaskWidth);
+        } else {
+            state.approvalRatio = 0.0f;
+        }
+        
+        // Рисуем маску на обработанном кадре (используем оригинальные размеры)
         int maskY, maskX;
         computeApprovalMaskCoords(state.processedFrame.rows, state.processedFrame.cols,
                                  state.approvalMaskHeight, state.approvalMaskWidth,
                                  maskY, maskX);
-        
-        // Вычисляем соотношение сосудов
-        state.approvalRatio = computeApprovalRatio(segmentedMask, maskY, maskX,
-                                                   state.approvalMaskHeight, 
-                                                   state.approvalMaskWidth);
-        
-        // Рисуем маску на обработанном кадре
         drawApprovalMask(state.processedFrame, maskY, maskX,
                         state.approvalMaskHeight, state.approvalMaskWidth,
                         state.approvalRatio, state.approvalThreshold);

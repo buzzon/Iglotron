@@ -46,6 +46,10 @@ bool SettingsManager::loadSettings(const std::string& filename, AppSettings& set
                 if (clahe.contains("maxIterations")) settings.claheMaxIterations = clahe["maxIterations"];
                 if (clahe.contains("targetContrast")) settings.claheTargetContrast = clahe["targetContrast"];
             }
+            
+            if (prep.contains("downscaleDivisor")) {
+                settings.downscaleDivisor = prep["downscaleDivisor"];
+            }
         }
         
         // Camera parameters
@@ -101,7 +105,8 @@ bool SettingsManager::saveSettings(const std::string& filename, const AppSetting
                 {"enabled", settings.claheEnabled},
                 {"maxIterations", settings.claheMaxIterations},
                 {"targetContrast", settings.claheTargetContrast}
-            }}
+            }},
+            {"downscaleDivisor", settings.downscaleDivisor}
         };
         
         // Camera parameters

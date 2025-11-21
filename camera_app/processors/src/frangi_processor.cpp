@@ -39,7 +39,7 @@ cv::Mat FrangiProcessor::process(const cv::Mat& input, float sigma, float beta, 
                                   int displayStage, bool invertEnabled,
                                   bool globalContrastEnabled, float brightness, float contrast,
                                   bool claheEnabled, int claheIterations, float claheTarget,
-                                  float segmentationThreshold) {
+                                  float segmentationThreshold, float downscaleFactor) {
     // CLAHE всегда применяется на CPU (перед GPU или CPU обработкой)
     cv::Mat preprocessed = input.clone();
     
@@ -59,9 +59,9 @@ cv::Mat FrangiProcessor::process(const cv::Mat& input, float sigma, float beta, 
         // GPU: Global Contrast через shader, CLAHE уже применен выше
         return glRenderer->processFrame(preprocessed, sigma, beta, c, displayStage, invertEnabled,
                                        globalContrastEnabled, brightness, contrast,
-                                       false, 0, 0.0f, segmentationThreshold);  // CLAHE уже применен
+                                       false, 0, 0.0f, segmentationThreshold, downscaleFactor);
     } else {
-        // CPU: все через MaskFilters
+        // CPU: все через MaskFilters (downscaling не поддерживается на CPU)
         return processCPU(preprocessed, sigma, beta, c, displayStage, invertEnabled,
                          globalContrastEnabled, brightness, contrast,
                          false, 0, 0.0f, segmentationThreshold);  // CLAHE уже применен

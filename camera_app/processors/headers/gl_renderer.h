@@ -54,6 +54,7 @@ public:
      * @param claheIterations (не используется)
      * @param claheTarget (не используется)
      * @param segmentationThreshold Порог для бинаризации vesselness (0.0 до 1.0)
+     * @param downscaleFactor Фактор уменьшения разрешения (0.1 - 1.0, где 1.0 = 100%)
      * 
      * @return Обработанное изображение в формате CV_8U
      */
@@ -69,12 +70,25 @@ public:
                          bool claheEnabled, 
                          int claheIterations, 
                          float claheTarget,
-                         float segmentationThreshold);
+                         float segmentationThreshold,
+                         float downscaleFactor = 1.0f);
     
     /**
      * @brief Освобождает все OpenGL ресурсы
      */
     void cleanup();
+    
+    /**
+     * @brief Получить текущую ширину downscaled изображения
+     * @return Ширина в пикселях (0 если не инициализировано)
+     */
+    int getDownscaledWidth() const { return downscaledWidth; }
+    
+    /**
+     * @brief Получить текущую высоту downscaled изображения
+     * @return Высота в пикселях (0 если не инициализировано)
+     */
+    int getDownscaledHeight() const { return downscaledHeight; }
 
 private:
     // Компиляция шейдеров
@@ -84,7 +98,7 @@ private:
     void createFramebuffer(GLuint* fbo, GLuint* texture, int width, int height);
     
     // Пересоздание всех framebuffers при изменении размера
-    void recreateFramebuffers(int width, int height);
+    void recreateFramebuffers(int width, int height, float downscaleFactor);
     
     // Загрузка OpenCV Mat в OpenGL текстуру
     void uploadTexture(const cv::Mat& image);
@@ -95,6 +109,9 @@ private:
     // Рендер одного прохода (простой случай: один вход, один выход)
     void renderPass(GLuint program, GLuint targetFBO, GLuint inputTex);
     
+    // Рендер одного прохода в downscaled framebuffer
+    void renderPassToDownscaled(GLuint program, GLuint targetFBO, GLuint inputTex);
+    
     // Установка параметров для шейдера свертки
     void setConvolveKernel(const std::vector<float>& kernel, int direction);
     
@@ -102,10 +119,14 @@ private:
     bool initialized;
     int currentWidth;
     int currentHeight;
+    int downscaledWidth;
+    int downscaledHeight;
+    float currentDownscaleFactor;
     
     // Shader programs
     GLuint globalContrastShader;
     GLuint grayscaleShader;
+    GLuint downscaleShader;
     GLuint invertShader;
     GLuint convolve1DShader;      // Универсальный шейдер 1D свертки
     GLuint scaleNormShader;       // Scale normalization (σ²)
@@ -117,6 +138,7 @@ private:
     // Framebuffers
     GLuint fboPreprocessed;
     GLuint fboGray;
+    GLuint fboDownscaled;
     GLuint fboInvert;
     
     // Временные буферы для вычисления производных
@@ -131,11 +153,13 @@ private:
     GLuint fboEigenvalues;
     GLuint fboVesselness;
     GLuint fboSegmentation;
+    GLuint fboOverlayDownscaled;  // Overlay в downscaled разрешении
     GLuint fboOverlay;
     
     // Textures (соответствуют framebuffers)
     GLuint texPreprocessed;
     GLuint texGray;
+    GLuint texDownscaled;
     GLuint texInvert;
     
     GLuint texDxxTemp;
@@ -149,6 +173,7 @@ private:
     GLuint texEigenvalues;
     GLuint texVesselness;
     GLuint texSegmentation;
+    GLuint texOverlayDownscaled;  // Overlay в downscaled разрешении
     GLuint texOverlay;
     
     // Входная текстура (для оригинального изображения)

@@ -32,6 +32,9 @@ struct AppState {
     int claheMaxIterations;
     float claheTargetContrast;
     
+    // Downscaling (уменьшение разрешения)
+    int downscaleDivisor = 1;  // 1 = без сжатия, 2 = сжатие в 2 раза, 4 = сжатие в 4 раза
+    
     // Камера
     CameraManager cameraManager;
     cv::Mat rawFrame;

@@ -11,7 +11,7 @@
 
 // Fallback
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+    #define M_PI 3.14159265358979323846
 #endif
 
 // ============================================================================
@@ -92,6 +92,22 @@ void main() {
     vec4 color = texture(uTexture, vUv);
     float inverted = 1.0 - color.x;
     FragColor = vec4(inverted, inverted, inverted, 1.0);
+}
+)";
+
+// Downscale shader - уменьшает разрешение с билинейной интерполяцией
+const char* downscaleFragmentSrc = R"(
+#version 330 core
+
+in vec2 vUv;
+out vec4 FragColor;
+
+uniform sampler2D uTexture;
+
+void main() {
+    // Просто берем текстуру с билинейной интерполяцией
+    // OpenGL автоматически интерполирует при рендеринге в меньший framebuffer
+    FragColor = texture(uTexture, vUv);
 }
 )";
 
@@ -299,10 +315,12 @@ uniform sampler2D uSegmented;
 
 void main() {
     vec4 original = texture(uOriginal, vUv);
+    // Конвертируем RGB в grayscale, если нужно
+    float gray = dot(original.rgb, vec3(0.299, 0.587, 0.114));
     float mask = texture(uSegmented, vUv).x;
     
     // Добавляем бинарную маску к исходному изображению
-    vec3 overlay = original.rgb + vec3(mask * 0.5);  // Полупрозрачная маска
+    vec3 overlay = vec3(gray) + vec3(mask * 0.5);  // Полупрозрачная маска
     
     FragColor = vec4(overlay, 1.0);
 }
@@ -365,18 +383,19 @@ std::vector<float> generateGaussianKernel(float sigma, int derivative_order) {
 GLRenderer::GLRenderer()
     : initialized(false), currentWidth(0), currentHeight(0),
       globalContrastShader(0), grayscaleShader(0), invertShader(0),
-      convolve1DShader(0), scaleNormShader(0),
+      downscaleShader(0), convolve1DShader(0), scaleNormShader(0),
       eigenvaluesShader(0), vesselnessShader(0),
       segmentationShader(0), overlayShader(0),
-      fboPreprocessed(0), fboGray(0), fboInvert(0),
+      fboPreprocessed(0), fboGray(0), fboDownscaled(0), fboInvert(0),
       fboDxxTemp(0), fboDxx(0), fboDyyTemp(0), fboDyy(0), fboDxyTemp(0), fboDxy(0),
       fboHessian(0), fboEigenvalues(0), fboVesselness(0),
-      fboSegmentation(0), fboOverlay(0),
-      texPreprocessed(0), texGray(0), texInvert(0),
+      fboSegmentation(0), fboOverlayDownscaled(0), fboOverlay(0),
+      texPreprocessed(0), texGray(0), texDownscaled(0), texInvert(0),
       texDxxTemp(0), texDxx(0), texDyyTemp(0), texDyy(0), texDxyTemp(0), texDxy(0),
       texHessian(0), texEigenvalues(0), texVesselness(0),
-      texSegmentation(0), texOverlay(0),
-      inputTexture(0), vao(0), vbo(0) {
+      texSegmentation(0), texOverlayDownscaled(0), texOverlay(0),
+      inputTexture(0), vao(0), vbo(0),
+      downscaledWidth(0), downscaledHeight(0), currentDownscaleFactor(1.0f) {
 }
 
 GLRenderer::~GLRenderer() {
@@ -475,6 +494,7 @@ bool GLRenderer::initialize() {
     // Компилируем все шейдеры
     globalContrastShader = compileShader(vertexShaderSrc, globalContrastFragmentSrc);
     grayscaleShader = compileShader(vertexShaderSrc, grayscaleFragmentSrc);
+    downscaleShader = compileShader(vertexShaderSrc, downscaleFragmentSrc);
     invertShader = compileShader(vertexShaderSrc, invertFragmentSrc);
     convolve1DShader = compileShader(vertexShaderSrc, convolve1DFragmentSrc);
     scaleNormShader = compileShader(vertexShaderSrc, scaleNormalizationFragmentSrc);
@@ -483,7 +503,7 @@ bool GLRenderer::initialize() {
     segmentationShader = compileShader(vertexShaderSrc, segmentationFragmentSrc);
     overlayShader = compileShader(vertexShaderSrc, overlayFragmentSrc);
     
-    if (!globalContrastShader || !grayscaleShader || !invertShader ||
+    if (!globalContrastShader || !grayscaleShader || !downscaleShader || !invertShader ||
         !convolve1DShader || !scaleNormShader ||
         !eigenvaluesShader || !vesselnessShader ||
         !segmentationShader || !overlayShader) {
@@ -522,44 +542,55 @@ bool GLRenderer::initialize() {
     return true;
 }
 
-void GLRenderer::recreateFramebuffers(int width, int height) {
+void GLRenderer::recreateFramebuffers(int width, int height, float downscaleFactor) {
     // Удаляем старые framebuffers и текстуры
     if (fboGray) {
         GLuint fbos[] = {
-            fboPreprocessed, fboGray, fboInvert,
+            fboPreprocessed, fboGray, fboDownscaled, fboInvert,
             fboDxxTemp, fboDxx, fboDyyTemp, fboDyy, fboDxyTemp, fboDxy,
             fboHessian, fboEigenvalues, fboVesselness,
             fboSegmentation, fboOverlay
         };
-        glDeleteFramebuffers(14, fbos);
+        glDeleteFramebuffers(15, fbos);
         
         GLuint textures[] = {
-            texPreprocessed, texGray, texInvert,
+            texPreprocessed, texGray, texDownscaled, texInvert,
             texDxxTemp, texDxx, texDyyTemp, texDyy, texDxyTemp, texDxy,
             texHessian, texEigenvalues, texVesselness,
             texSegmentation, texOverlay
         };
-        glDeleteTextures(14, textures);
+        glDeleteTextures(15, textures);
     }
+    
+    // Вычисляем размеры для downscaled изображения
+    downscaledWidth = static_cast<int>(std::round(width * downscaleFactor));
+    downscaledHeight = static_cast<int>(std::round(height * downscaleFactor));
+    // Минимум 1 пиксель
+    if (downscaledWidth < 1) downscaledWidth = 1;
+    if (downscaledHeight < 1) downscaledHeight = 1;
     
     // Создаем новые
     createFramebuffer(&fboPreprocessed, &texPreprocessed, width, height);
-    createFramebuffer(&fboGray, &texGray, width, height);
-    createFramebuffer(&fboInvert, &texInvert, width, height);
+    // Downscaled создается в оригинальном разрешении (RGB), затем уменьшается
+    createFramebuffer(&fboDownscaled, &texDownscaled, downscaledWidth, downscaledHeight);
+    // Gray создается в downscaled разрешении (grayscale)
+    createFramebuffer(&fboGray, &texGray, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboInvert, &texInvert, downscaledWidth, downscaledHeight);
     
-    // Temp buffers для вычисления производных
-    createFramebuffer(&fboDxxTemp, &texDxxTemp, width, height);
-    createFramebuffer(&fboDxx, &texDxx, width, height);
-    createFramebuffer(&fboDyyTemp, &texDyyTemp, width, height);
-    createFramebuffer(&fboDyy, &texDyy, width, height);
-    createFramebuffer(&fboDxyTemp, &texDxyTemp, width, height);
-    createFramebuffer(&fboDxy, &texDxy, width, height);
+    // Temp buffers для вычисления производных (используем downscaled размер)
+    createFramebuffer(&fboDxxTemp, &texDxxTemp, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboDxx, &texDxx, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboDyyTemp, &texDyyTemp, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboDyy, &texDyy, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboDxyTemp, &texDxyTemp, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboDxy, &texDxy, downscaledWidth, downscaledHeight);
     
-    createFramebuffer(&fboHessian, &texHessian, width, height);
-    createFramebuffer(&fboEigenvalues, &texEigenvalues, width, height);
-    createFramebuffer(&fboVesselness, &texVesselness, width, height);
-    createFramebuffer(&fboSegmentation, &texSegmentation, width, height);
-    createFramebuffer(&fboOverlay, &texOverlay, width, height);
+    createFramebuffer(&fboHessian, &texHessian, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboEigenvalues, &texEigenvalues, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboVesselness, &texVesselness, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboSegmentation, &texSegmentation, downscaledWidth, downscaledHeight);
+    createFramebuffer(&fboOverlayDownscaled, &texOverlayDownscaled, downscaledWidth, downscaledHeight);  // Overlay в downscaled разрешении
+    createFramebuffer(&fboOverlay, &texOverlay, width, height);  // Overlay в оригинальном разрешении (после масштабирования)
     
     currentWidth = width;
     currentHeight = height;
@@ -593,8 +624,14 @@ void GLRenderer::uploadTexture(const cv::Mat& image) {
 }
 
 cv::Mat GLRenderer::downloadTexture(GLuint texture, int width, int height) {
-    cv::Mat result(height, width, CV_32FC4);
+    // Получаем реальный размер текстуры
     glBindTexture(GL_TEXTURE_2D, texture);
+    GLint texWidth, texHeight;
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &texWidth);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &texHeight);
+    
+    // Используем правильный порядок: Mat(rows, cols, type) и реальные размеры текстуры
+    cv::Mat result(texHeight, texWidth, CV_32FC4);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, result.data);
     glBindTexture(GL_TEXTURE_2D, 0);
     
@@ -609,6 +646,25 @@ cv::Mat GLRenderer::downloadTexture(GLuint texture, int width, int height) {
 void GLRenderer::renderPass(GLuint program, GLuint targetFBO, GLuint inputTex) {
     glBindFramebuffer(GL_FRAMEBUFFER, targetFBO);
     glViewport(0, 0, currentWidth, currentHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    glUseProgram(program);
+    glBindVertexArray(vao);
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, inputTex);
+    glUniform1i(glGetUniformLocation(program, "uTexture"), 0);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+void GLRenderer::renderPassToDownscaled(GLuint program, GLuint targetFBO, GLuint inputTex) {
+    glBindFramebuffer(GL_FRAMEBUFFER, targetFBO);
+    glViewport(0, 0, downscaledWidth, downscaledHeight);
     glClear(GL_COLOR_BUFFER_BIT);
     
     glUseProgram(program);
@@ -641,15 +697,20 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
                                   int displayStage, bool invertEnabled,
                                   bool globalContrastEnabled, float brightness, float contrast,
                                   bool claheEnabled, int claheIterations, float claheTarget,
-                                  float segmentationThreshold) {
+                                  float segmentationThreshold, float downscaleFactor) {
     if (!initialized) {
         std::cerr << "GL Renderer not initialized!" << std::endl;
         return cv::Mat();
     }
     
-    // Пересоздаем framebuffers если размер изменился
-    if (input.cols != currentWidth || input.rows != currentHeight) {
-        recreateFramebuffers(input.cols, input.rows);
+    // Ограничиваем downscaleFactor в диапазоне [0.25, 1.0] (соответствует divisor 1, 2, 4)
+    downscaleFactor = std::max(0.25f, std::min(1.0f, downscaleFactor));
+    
+    // Пересоздаем framebuffers если размер изменился или изменился downscaleFactor
+    if (input.cols != currentWidth || input.rows != currentHeight || 
+        downscaleFactor != currentDownscaleFactor) {
+        recreateFramebuffers(input.cols, input.rows, downscaleFactor);
+        currentDownscaleFactor = downscaleFactor;
     }
     
     // Загружаем входное изображение
@@ -667,16 +728,54 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
         textureAfterPreprocessing = texPreprocessed;
     }
     
-    // Pass 0: Grayscale
-    renderPass(grayscaleShader, fboGray, textureAfterPreprocessing);
+    // Pass 0: Downscale (уменьшение разрешения) - ПЕРЕД grayscale
+    // Всегда рендерим в fboDownscaled, чтобы texDownscaled всегда содержал валидное изображение
+    GLuint textureAfterDownscale;
+    glBindFramebuffer(GL_FRAMEBUFFER, fboDownscaled);
+    glViewport(0, 0, downscaledWidth, downscaledHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
     
-    // Pass 1: Invert (опционально)
+    glUseProgram(downscaleShader);
+    glBindVertexArray(vao);
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureAfterPreprocessing);
+    glUniform1i(glGetUniformLocation(downscaleShader, "uTexture"), 0);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
+    textureAfterDownscale = texDownscaled;
+    
+    // Pass 0.5: Grayscale (на downscaled изображении)
+    renderPassToDownscaled(grayscaleShader, fboGray, textureAfterDownscale);
+    
+    // Pass 1: Invert (опционально) - работает с grayscale
     GLuint textureAfterInvert;
     if (invertEnabled) {
-        renderPass(invertShader, fboInvert, texGray);
+        glBindFramebuffer(GL_FRAMEBUFFER, fboInvert);
+        glViewport(0, 0, downscaledWidth, downscaledHeight);
+        glClear(GL_COLOR_BUFFER_BIT);
+        
+        glUseProgram(invertShader);
+        glBindVertexArray(vao);
+        
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texGray);  // Используем grayscale изображение
+        glUniform1i(glGetUniformLocation(invertShader, "uTexture"), 0);
+        
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+        
+        glBindVertexArray(0);
+        glUseProgram(0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        
         textureAfterInvert = texInvert;
     } else {
-        textureAfterInvert = texGray;
+        textureAfterInvert = texGray;  // Используем grayscale, а не downscaled RGB
     }
     
     // ========================================================================
@@ -696,33 +795,33 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     // --- Вычисление Dxx = (d²G/dx²) ⊗ G ---
     // Проход 1: Horizontal d²G/dx²
     setConvolveKernel(kernel_d2g, 0);  // direction=0 (horizontal)
-    renderPass(convolve1DShader, fboDxxTemp, textureAfterInvert);
+    renderPassToDownscaled(convolve1DShader, fboDxxTemp, textureAfterInvert);
     
     // Проход 2: Vertical G
     setConvolveKernel(kernel_g, 1);  // direction=1 (vertical)
-    renderPass(convolve1DShader, fboDxx, texDxxTemp);
+    renderPassToDownscaled(convolve1DShader, fboDxx, texDxxTemp);
     
     // --- Вычисление Dyy = G ⊗ (d²G/dy²) ---
     // Проход 1: Horizontal G
     setConvolveKernel(kernel_g, 0);
-    renderPass(convolve1DShader, fboDyyTemp, textureAfterInvert);
+    renderPassToDownscaled(convolve1DShader, fboDyyTemp, textureAfterInvert);
     
     // Проход 2: Vertical d²G/dy²
     setConvolveKernel(kernel_d2g, 1);
-    renderPass(convolve1DShader, fboDyy, texDyyTemp);
+    renderPassToDownscaled(convolve1DShader, fboDyy, texDyyTemp);
     
     // --- Вычисление Dxy = (dG/dx) ⊗ (dG/dy) ---
     // Проход 1: Horizontal dG/dx
     setConvolveKernel(kernel_dg, 0);
-    renderPass(convolve1DShader, fboDxyTemp, textureAfterInvert);
+    renderPassToDownscaled(convolve1DShader, fboDxyTemp, textureAfterInvert);
     
     // Проход 2: Vertical dG/dy
     setConvolveKernel(kernel_dg, 1);
-    renderPass(convolve1DShader, fboDxy, texDxyTemp);
+    renderPassToDownscaled(convolve1DShader, fboDxy, texDxyTemp);
     
     // --- Scale Normalization: умножаем на σ² ---
     glBindFramebuffer(GL_FRAMEBUFFER, fboHessian);
-    glViewport(0, 0, currentWidth, currentHeight);
+    glViewport(0, 0, downscaledWidth, downscaledHeight);
     glClear(GL_COLOR_BUFFER_BIT);
     
     glUseProgram(scaleNormShader);
@@ -748,7 +847,7 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     // ========================================================================
     // Pass: Eigenvalues
     // ========================================================================
-    renderPass(eigenvaluesShader, fboEigenvalues, texHessian);
+    renderPassToDownscaled(eigenvaluesShader, fboEigenvalues, texHessian);
     
     // ========================================================================
     // Pass: Vesselness
@@ -759,13 +858,13 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     glUniform1i(glGetUniformLocation(vesselnessShader, "uBlackWhite"), invertEnabled ? 0 : 1);
     glUseProgram(0);
     
-    renderPass(vesselnessShader, fboVesselness, texEigenvalues);
+    renderPassToDownscaled(vesselnessShader, fboVesselness, texEigenvalues);
     
     // ========================================================================
     // Pass: Segmentation
     // ========================================================================
     glBindFramebuffer(GL_FRAMEBUFFER, fboSegmentation);
-    glViewport(0, 0, currentWidth, currentHeight);
+    glViewport(0, 0, downscaledWidth, downscaledHeight);
     glClear(GL_COLOR_BUFFER_BIT);
     
     glUseProgram(segmentationShader);
@@ -783,17 +882,20 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     
     // ========================================================================
-    // Pass: Overlay
+    // Pass: Overlay (сначала в downscaled разрешении, затем масштабируем обратно)
     // ========================================================================
-    glBindFramebuffer(GL_FRAMEBUFFER, fboOverlay);
-    glViewport(0, 0, currentWidth, currentHeight);
+    
+    // Шаг 1: Рендерим overlay в downscaled разрешении
+    glBindFramebuffer(GL_FRAMEBUFFER, fboOverlayDownscaled);
+    glViewport(0, 0, downscaledWidth, downscaledHeight);
     glClear(GL_COLOR_BUFFER_BIT);
     
     glUseProgram(overlayShader);
     glBindVertexArray(vao);
     
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, inputTexture);
+    // Используем downscaled RGB изображение - шейдер сам конвертирует в grayscale
+    glBindTexture(GL_TEXTURE_2D, texDownscaled);
     glUniform1i(glGetUniformLocation(overlayShader, "uOriginal"), 0);
     
     glActiveTexture(GL_TEXTURE1);
@@ -806,24 +908,78 @@ cv::Mat GLRenderer::processFrame(const cv::Mat& input, float sigma, float beta, 
     glUseProgram(0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     
+    // Шаг 2: Масштабируем overlay обратно в оригинальное разрешение
+    glBindFramebuffer(GL_FRAMEBUFFER, fboOverlay);
+    glViewport(0, 0, currentWidth, currentHeight);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    glUseProgram(downscaleShader);  // Используем downscale shader для upscaling (билинейная интерполяция)
+    glBindVertexArray(vao);
+    
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texOverlayDownscaled);
+    // Устанавливаем параметры текстуры для правильного масштабирования
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glUniform1i(glGetUniformLocation(downscaleShader, "uTexture"), 0);
+    
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    
     // ========================================================================
     // Выбираем какую текстуру вернуть
     // ========================================================================
     GLuint textureToShow;
+    int textureWidth, textureHeight;
     switch(displayStage) {
-        case 0: textureToShow = texGray; break;
-        case 1: textureToShow = texInvert; break;
-        case 2: textureToShow = texDxx; break;  // Dxx для отладки
-        case 3: textureToShow = texHessian; break;
-        case 4: textureToShow = texEigenvalues; break;
-        case 5: textureToShow = texVesselness; break;
-        case 6: textureToShow = texSegmentation; break;
+        case 0: 
+            textureToShow = texGray; 
+            textureWidth = downscaledWidth;  // Grayscale теперь в downscaled разрешении
+            textureHeight = downscaledHeight;
+            break;
+        case 1: 
+            textureToShow = texInvert; 
+            textureWidth = downscaledWidth;
+            textureHeight = downscaledHeight;
+            break;
+        case 2: 
+            textureToShow = texDxx; 
+            textureWidth = downscaledWidth;
+            textureHeight = downscaledHeight;
+            break;  // Dxx для отладки
+        case 3: 
+            textureToShow = texHessian; 
+            textureWidth = downscaledWidth;
+            textureHeight = downscaledHeight;
+            break;
+        case 4: 
+            textureToShow = texEigenvalues; 
+            textureWidth = downscaledWidth;
+            textureHeight = downscaledHeight;
+            break;
+        case 5: 
+            textureToShow = texVesselness; 
+            textureWidth = downscaledWidth;
+            textureHeight = downscaledHeight;
+            break;
+        case 6: 
+            textureToShow = texSegmentation; 
+            textureWidth = downscaledWidth;
+            textureHeight = downscaledHeight;
+            break;
         case 7:
         case 8:
-        default: textureToShow = texOverlay; break;
+        default: 
+            textureToShow = texOverlay; 
+            textureWidth = currentWidth;
+            textureHeight = currentHeight;
+            break;
     }
     
-    return downloadTexture(textureToShow, currentWidth, currentHeight);
+    return downloadTexture(textureToShow, textureWidth, textureHeight);
 }
 
 void GLRenderer::cleanup() {
@@ -832,6 +988,7 @@ void GLRenderer::cleanup() {
     // Удаляем шейдеры
     if (globalContrastShader) glDeleteProgram(globalContrastShader);
     if (grayscaleShader) glDeleteProgram(grayscaleShader);
+    if (downscaleShader) glDeleteProgram(downscaleShader);
     if (invertShader) glDeleteProgram(invertShader);
     if (convolve1DShader) glDeleteProgram(convolve1DShader);
     if (scaleNormShader) glDeleteProgram(scaleNormShader);
@@ -843,20 +1000,20 @@ void GLRenderer::cleanup() {
     // Удаляем framebuffers и текстуры
     if (fboGray) {
         GLuint fbos[] = {
-            fboPreprocessed, fboGray, fboInvert,
+            fboPreprocessed, fboGray, fboDownscaled, fboInvert,
             fboDxxTemp, fboDxx, fboDyyTemp, fboDyy, fboDxyTemp, fboDxy,
             fboHessian, fboEigenvalues, fboVesselness,
-            fboSegmentation, fboOverlay
+            fboSegmentation, fboOverlayDownscaled, fboOverlay
         };
-        glDeleteFramebuffers(14, fbos);
+        glDeleteFramebuffers(16, fbos);
         
         GLuint textures[] = {
-            texPreprocessed, texGray, texInvert,
+            texPreprocessed, texGray, texDownscaled, texInvert,
             texDxxTemp, texDxx, texDyyTemp, texDyy, texDxyTemp, texDxy,
             texHessian, texEigenvalues, texVesselness,
-            texSegmentation, texOverlay
+            texSegmentation, texOverlayDownscaled, texOverlay
         };
-        glDeleteTextures(14, textures);
+        glDeleteTextures(16, textures);
     }
     
     if (inputTexture) glDeleteTextures(1, &inputTexture);

@@ -17,7 +17,8 @@
             "enabled": false,
             "maxIterations": 2,
             "targetContrast": 0.3
-        }
+        },
+        "downscaleDivisor": 1
     },
     "camera": {
         "selectedIndex": 0
